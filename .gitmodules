@@ -1,0 +1,3 @@
+[submodule "ahc-tester"]
+	path = ahc-tester
+	url = git@github.com:KKT89/ahc-tester.git
