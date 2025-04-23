@@ -1,0 +1,17 @@
+## 使い方
+
+ahc-teser の使い方は[こちら](https://github.com/KKT89/ahc-tester/blob/main/README.md)
+
+### CMAKEファイルの更新
+
+デフォルト値の `ahc_default_project` となっているので、適切なプロジェクト名に変更。
+
+### サブモジュールの追加
+```
+$ git submodule update --init --recursive
+```
+
+### サブモジュールの更新(必要時)
+```
+$ git submodule update --remote
+```
