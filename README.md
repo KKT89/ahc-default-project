@@ -1,6 +1,6 @@
 ## 使い方
 
-ahc-teser の使い方は[こちら](https://github.com/KKT89/ahc-tester/blob/main/README.md)
+ahc-tester の使い方は[こちら](https://github.com/KKT89/ahc-tester/blob/main/README.md)
 
 ### CMAKEファイルの更新
 
