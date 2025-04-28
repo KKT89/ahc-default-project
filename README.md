@@ -4,7 +4,7 @@ ahc-tester の使い方は[こちら](https://github.com/KKT89/ahc-tester/blob/m
 
 ### CMAKEファイルの更新
 
-デフォルト値の `ahc_default_project` となっているので、適切なプロジェクト名に変更。
+デフォルト値の `AHCxxx` となっているので、適切なプロジェクト名に変更。
 
 ### サブモジュールの追加
 ```
