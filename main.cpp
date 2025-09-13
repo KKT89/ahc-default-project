@@ -3,12 +3,10 @@
 using namespace std;
 typedef long long int ll;
 
-#include "params.cpp"
-#include "lib/heuristic-lib/timer.hpp"
-#include "lib/heuristic-lib/rnd32.hpp"
+#include "lib/timer.hpp"
+#include "lib/rnd32.hpp"
 
-int main(int argc, char *argv[]) {
+int main() {
     cin.tie(nullptr);
     ios::sync_with_stdio(false);
-    updateParams(argc, argv);
 }
