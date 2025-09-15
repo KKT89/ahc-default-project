@@ -2,16 +2,45 @@
 
 ahc-tester の使い方は[こちら](https://github.com/KKT89/ahc-tester/blob/main/README.md)
 
-### CMAKEファイルの更新
+### 事前準備
+- `tools/`: 公式ローカルテストツール一式をリポジトリ直下に配置してください。
+- `task.html`: 問題文のローカルコピーをリポジトリ直下に配置してください。
+- 上記を配置したうえで、次の「初期セットアップ」を実行します。
 
-デフォルト値の `AHCxxx` となっているので、適切なプロジェクト名に変更。
+## ディレクトリ構成
 
-### サブモジュールの追加
 ```
-$ git submodule update --init --recursive
+AHCxxx/                  // ルートディレクトリ
+├── ahc-tester/          
+├── tools/               // 公式ローカルテストツール
+├── task.html            // 問題文（ローカル用）
+└── main.cpp             // 解答コード
 ```
 
-### サブモジュールの更新(必要時)
+### 初期セットアップ
+以下のスクリプトで、仮想環境の作成・依存導入・ツールのセットアップを一括実行します。
+
 ```
-$ git submodule update --remote
+$ bash scripts/init.sh -o <max|min|maximize|minimize> -t <秒>
 ```
+
+実行権限を付けて直接実行する場合は以下。
+
+```
+$ chmod +x scripts/init.sh && ./scripts/init.sh -o <max|min|maximize|minimize> -t <秒>
+```
+
+- 前提: `uv` がインストール済み、`ahc-tester/requirements.txt` が存在。
+- 必須:
+  - `-o, --objective`: `max|min|maximize|minimize`
+  - `-t, --tl`: タイムリミット(秒, float)
+- 任意:
+  - `-i, --interactive`: インタラクティブ問題の場合に付与
+
+例:
+
+```
+$ bash scripts/init.sh -o max -t 2 -i
+```
+
+メモ: `config.toml` が存在する場合、上書き確認のプロンプトが表示されます。
