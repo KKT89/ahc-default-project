@@ -18,7 +18,7 @@ ahc-tester の使い方は[こちら](https://github.com/KKT89/ahc-tester/blob/m
 - 上記を配置したうえで、次の「初回セットアップ」を実行します。
 
 ### 初回セットアップ
-以下のスクリプトで、仮想環境の作成・依存導入・ツールのセットアップを一括実行します。
+以下のスクリプトで、仮想環境の作成・依存導入・ツールのセットアップ（プロジェクトルートに `config.toml` を作成）を一括実行します。
 
 ```
 $ bash scripts/init.sh -o <max|min|maximize|minimize> -t <秒>
