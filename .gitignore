@@ -1,7 +1,31 @@
-*.idea
-cmake-build-debug
-*.txt
-tools
-vis.html
+## Editors/OS
+.idea/
+.vscode/
+.DS_Store
+
+## Python
+.venv/
+__pycache__/
+*.pyc
+
+## CMake/Build
+cmake-build-debug/
+
+## Project binaries/artifacts
 solution
+gen
+tester
+vis
+vis.html
+
+## External tools directory (placed manually or as submodule)
+tools/
+
+## Generated sources/config
+combined.cpp
+params.cpp
+config.toml
+
+## Data/logs
 *.tsv
+*.txt
