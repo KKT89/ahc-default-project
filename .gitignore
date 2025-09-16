@@ -23,9 +23,9 @@ tools/
 
 ## Generated sources/config
 combined.cpp
-params.cpp
 config.toml
 
 ## Data/logs
+in/
+out/
 *.tsv
-*.txt
