@@ -13,19 +13,12 @@ cmake-build-debug/
 
 ## Project binaries/artifacts
 solution
-gen
-tester
-vis
 vis.html
-
-## External tools directory (placed manually or as submodule)
-tools/
 
 ## Generated sources/config
 combined.cpp
-config.toml
 
 ## Data/logs
-in/
 out/
 *.tsv
+tools/target/
