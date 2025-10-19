@@ -1,3 +1,4 @@
+import argparse
 import build
 import config_util as config_util
 import subprocess
@@ -89,7 +90,20 @@ def run_test_case(
     }
 
 
+def parse_args():
+    parser = argparse.ArgumentParser(description="Run local tests for AHC submissions.")
+    parser.add_argument(
+        "--cases",
+        type=int,
+        default=None,
+        help="Number of test cases to run (default: value from config, typically 150).",
+    )
+    return parser.parse_args()
+
+
 def main():
+    args = parse_args()
+
     # コンパイル
     config = config_util.load_config()
     build.compile_program(config)
@@ -107,15 +121,39 @@ def main():
     is_interactive = config["problem"]["interactive"]
 
     os.makedirs(output_dir, exist_ok=True)
+
+    available_cases = sorted(
+        int(os.path.splitext(fname)[0])
+        for fname in os.listdir(input_dir)
+        if fname.endswith(".txt") and os.path.splitext(fname)[0].isdigit()
+    )
+    if not available_cases:
+        raise FileNotFoundError(f"No input cases were found under {input_dir}")
     
     # テストケースの実行結果
-    testcase_count = config["problem"]["pretest_count"]
+    config_case_count = config["problem"]["pretest_count"]
+    if args.cases is None:
+        requested_count = config_case_count
+    else:
+        if args.cases <= 0:
+            raise ValueError("--cases must be positive.")
+        requested_count = args.cases
+
+    testcase_count = min(requested_count, len(available_cases))
+    if requested_count > len(available_cases):
+        print(
+            f"Warning: requested {requested_count} cases but only {len(available_cases)} available. "
+            f"Using {testcase_count} cases."
+        )
+
     wrong_answer_count = 0
     results = []
 
     # シンプルな逐次実行に限定
-    for i in range(testcase_count):
-        case_str = f"{i:04d}"
+    selected_cases = available_cases[:testcase_count]
+
+    for case_id in selected_cases:
+        case_str = f"{case_id:04d}"
         input_file = os.path.join(input_dir, case_str + ".txt")
         output_file = os.path.join(output_dir, case_str + ".txt")
         if not os.path.exists(input_file):

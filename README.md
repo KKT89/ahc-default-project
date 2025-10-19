@@ -38,3 +38,13 @@ $ ./scripts/init.sh -o <max|min|maximize|minimize> -t <秒>
 ```
 $ bash scripts/init.sh -o max -t 2 -i
 ```
+
+### ローカルテストの実行
+
+```
+$ uv run ahc-tester/run_test.py            # config 上の全ケース（既定 150 件）を実行
+$ uv run ahc-tester/run_test.py --cases 5  # 冒頭 5 ケースだけ検証
+```
+
+- `--cases` を省略すると `config.toml` に設定された件数（デフォルト 150）を実行します。
+- 指定数が手元の入力ファイル数を超える場合は、利用可能な件数までに自動調整されます。
