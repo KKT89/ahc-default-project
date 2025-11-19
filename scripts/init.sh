@@ -4,9 +4,8 @@ set -Eeuo pipefail
 # Quick setup script (uv-first, requirements required)
 # - Create venv with `uv venv .venv`
 # - Install deps from ahc-tester/requirements.txt (required)
-# - Run setup: `uv run ahc-tester/setup.py <objective> <tl> [-i]`
+# - Run setup: `uv run ahc-tester/setup.py <objective> [-i]`
 #   - objective (required): max|min|maximize|minimize
-#   - tl (required): time limit in seconds (float)
 #   - -i/--interactive (optional): interactive problem flag
 
 here_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -18,20 +17,27 @@ req_file="ahc-tester/requirements.txt"
 info() { printf "[info] %s\n" "$*"; }
 err()  { printf "[error] %s\n" "$*" >&2; }
 
+cleanup_zone_identifier_files() {
+  mapfile -t zid_files < <(find "${repo_root}" -name '*:Zone.Identifier' -type f -print)
+  if [[ ${#zid_files[@]} -eq 0 ]]; then
+    return
+  fi
+  info "Removing ${#zid_files[@]} Zone.Identifier files"
+  rm -f -- "${zid_files[@]}"
+}
+
 usage() {
   cat <<USAGE
-Usage: bash scripts/init.sh -o <objective> -t <seconds> [--interactive]
+Usage: bash scripts/init.sh -o <objective> [--interactive]
 
 Options:
   -o, --objective   max|min|maximize|minimize (required)
-  -t, --tl          time limit in seconds (float, required)
   -i, --interactive mark problem as interactive (optional)
   -h, --help       show this help
 USAGE
 }
 
 objective=""
-tl=""
 interactive=false
 
 lc() { printf %s "$1" | tr '[:upper:]' '[:lower:]'; }
@@ -41,9 +47,6 @@ while [[ $# -gt 0 ]]; do
     -o|--objective)
       [[ $# -ge 2 ]] || { err "Missing value for $1"; usage; exit 2; }
       objective="$(lc "$2")"; shift 2 ;;
-    -t|--tl)
-      [[ $# -ge 2 ]] || { err "Missing value for $1"; usage; exit 2; }
-      tl="$2"; shift 2 ;;
     -i|--interactive)
       interactive=true; shift ;;
     -h|--help)
@@ -62,15 +65,9 @@ case "$(lc "${objective:-}")" in
   *) err "Invalid objective: $objective"; usage; exit 2 ;;
 esac
 
-# Validate tl is positive number
-if [[ -z "$tl" ]]; then
-  err "-t/--tl is required"; usage; exit 2
-fi
-if ! awk "BEGIN{exit(!($tl+0>0))}" </dev/null; then
-  err "tl must be a positive number (seconds), got: $tl"; exit 2
-fi
-
 trap 'err "setup failed (line $LINENO)"' ERR
+
+cleanup_zone_identifier_files
 
 if ! command -v uv >/dev/null 2>&1; then
   err "'uv' is required but not found. Install from https://github.com/astral-sh/uv"
@@ -88,7 +85,7 @@ uv venv .venv
 info "Installing dependencies from ${req_file}"
 uv pip install -r "${req_file}"
 
-cmd=(uv run ahc-tester/setup.py "$objective" "$tl")
+cmd=(uv run ahc-tester/setup.py "$objective")
 if $interactive; then cmd+=("-i"); fi
 info "Running setup: ${cmd[*]}"
 "${cmd[@]}"

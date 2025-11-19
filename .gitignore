@@ -8,17 +8,15 @@
 __pycache__/
 *.pyc
 
-## CMake/Build
+## CMake
 cmake-build-debug/
-
-## Project binaries/artifacts
-solution
-vis.html
 
 ## Generated sources/config
 combined.cpp
+solution
+vis.html
 
 ## Data/logs
 out/
-*.tsv
+tools/in/
 tools/target/

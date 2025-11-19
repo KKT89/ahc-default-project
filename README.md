@@ -23,20 +23,19 @@ ahc-tester の使い方は[こちら](https://github.com/KKT89/ahc-tester/blob/m
 
 ```
 $ chmod +x scripts/init.sh
-$ ./scripts/init.sh -o <max|min|maximize|minimize> -t <秒>
+$ ./scripts/init.sh -o <max|min|maximize|minimize>
 ```
 
 - 前提：`uv` がインストール済み
 - 必須：
   - `-o, --objective`：`max|min|maximize|minimize`
-  - `-t, --tl`：タイムリミット(秒)
 - 任意：
   - `-i, --interactive`：インタラクティブ問題の場合に付与
 
 **例**
 
 ```
-$ bash scripts/init.sh -o max -t 2 -i
+$ bash scripts/init.sh -o max -i
 ```
 
 ### ローカルテストの実行

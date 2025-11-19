@@ -26,7 +26,6 @@ DEFAULT_CONFIG = {
     },
     "problem": {
         "pretest_count": 150,                               # プレテストの数
-        "time_limit_ms": 2000,                              # タイムリミット（ミリ秒）。CLI は秒入力、保存は ms。
         "interactive": False,                               # インタラクティブかどうか
         "objective": "maximize",                            # 最大化 or 最小化
         "score_prefix": "Score =",                          # テスターの出力からスコアを取得するためのプレフィックス
@@ -131,13 +130,6 @@ def parse_args():
         help="Optimization direction: max/min (maximize/minimize)",
     )
 
-    # TL
-    parser.add_argument(
-        "tl",
-        type=float,
-        help="Time limit in seconds",
-    )
-
     # インタラクティブのときだけ -i を付ける（デフォルトは非インタラクティブ）
     parser.add_argument(
         "-i", "--interactive",
@@ -158,10 +150,6 @@ def build_config_from_args(args) -> dict:
             cfg[k] = dict(v)
     cfg["problem"]["objective"] = _normalize_objective(args.objective)
     cfg["problem"]["interactive"] = bool(args.interactive)
-    if args.tl is None or args.tl <= 0:
-        raise ValueError("tl must be a positive number (seconds)")
-    # 秒入力をミリ秒整数へ変換して保存
-    cfg["problem"]["time_limit_ms"] = int(args.tl * 1000)
     return cfg
 
 

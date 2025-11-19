@@ -13,29 +13,28 @@ $ uv pip install -r ahc-tester/requirements.txt
 ### セットアップ
 プロジェクトルートに設定ファイル `config.toml` を作成し、公式ローカルテストツールのビルドを実行します。
 
-`objective` とタイムリミットの指定は必須です。インタラクティブ問題の場合のみ `-i` を指定します。
+`objective` の指定が必須です。インタラクティブ問題の場合のみ `-i` を指定します。
 
 ```
-$ uv run ahc-tester/setup.py {max|min|maximize|minimize} TL-sec [-i]
+$ uv run ahc-tester/setup.py {max|min|maximize|minimize} [-i]
 ```
 
 **主な引数**
 - `objective`：最適化方向 `max|min|maximize|minimize` を受け付け、内部で `maximize|minimize` に正規化します。
-- `TL-sec`：秒で指定し、内部ではミリ秒整数で保存します。
 - `-i, --interactive`：インタラクティブ問題のときに指定し、この時 `tester` を追加でビルドします。
 
 **使用例**
-- 非インタラクティブ・最大化 (TL=2sec)
+- 非インタラクティブ・最大化
 ```
-$ uv run ahc-tester/setup.py max 2
+$ uv run ahc-tester/setup.py max
 ```
-- インタラクティブ・最大化 (TL=2.5sec)
+- インタラクティブ・最大化
 ```
-$ uv run ahc-tester/setup.py max 2.5 -i
+$ uv run ahc-tester/setup.py max -i
 ```
-- 非インタラクティブ・最小化 (TL=1sec)
+- 非インタラクティブ・最小化
 ```
-$ uv run ahc-tester/setup.py min 1
+$ uv run ahc-tester/setup.py min
 ```
 
 **ヘルプ表示**
