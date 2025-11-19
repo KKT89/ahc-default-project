@@ -55,12 +55,6 @@ $ uv run ahc-tester/make_test.py L R
 $ uv run ahc-tester/build.py
 ```
 
-### ファイル結合
-
-```
-$ uv run ahc-tester/combiner.py
-```
-
 ### パラメータ（HP_PARAM）
 `lib/hp_params.hpp` の `HP_PARAM(type, name, def, low, high)` でハイパーパラメータを宣言します。
 Optuna 実行時は、`main.cpp` からこれらを自動抽出して study ディレクトリに `params.json` を生成します。
