@@ -71,11 +71,22 @@ def parse_args():
         default=None,
         help="Number of test cases to run (default: value from config, typically 150).",
     )
+    parser.add_argument(
+        "--range",
+        nargs=2,
+        metavar=("L", "R"),
+        type=int,
+        default=None,
+        help="Run cases with seed IDs in [L, R).",
+    )
     return parser.parse_args()
 
 
 def main():
     args = parse_args()
+
+    if args.range is not None and args.cases is not None:
+        raise ValueError("--range and --cases cannot be used together.")
 
     # コンパイル
     config = config_util.load_config()
@@ -100,29 +111,40 @@ def main():
         raise FileNotFoundError(f"No input cases were found under {input_dir}")
     
     # テストケースの実行結果
-    config_case_count = config["problem"]["pretest_count"]
-    if args.cases is None:
-        requested_count = config_case_count
+    if args.range is not None:
+        l_seed, r_seed = args.range
+        if l_seed < 0 or r_seed <= l_seed:
+            raise ValueError("--range requires integers with 0 <= L < R.")
+        selected_cases = [
+            case_id for case_id in available_cases if l_seed <= case_id < r_seed
+        ]
+        if not selected_cases:
+            raise ValueError(
+                f"No cases found in the requested range [{l_seed}, {r_seed})."
+            )
+        testcase_count = len(selected_cases)
     else:
-        if args.cases <= 0:
-            raise ValueError("--cases must be positive.")
-        requested_count = args.cases
+        config_case_count = config["problem"]["pretest_count"]
+        if args.cases is None:
+            requested_count = config_case_count
+        else:
+            if args.cases <= 0:
+                raise ValueError("--cases must be positive.")
+            requested_count = args.cases
 
-    testcase_count = min(requested_count, len(available_cases))
-    if requested_count > len(available_cases):
-        print(
-            f"Warning: requested {requested_count} cases but only {len(available_cases)} available. "
-            f"Using {testcase_count} cases."
-        )
+        testcase_count = min(requested_count, len(available_cases))
+        if requested_count > len(available_cases):
+            print(
+                f"Warning: requested {requested_count} cases but only {len(available_cases)} available. "
+                f"Using {testcase_count} cases."
+            )
+        selected_cases = available_cases[:testcase_count]
 
     wrong_answer_count = 0
     results = []
 
-    # シンプルな逐次実行に限定
-    selected_cases = available_cases[:testcase_count]
-
     for case_id in selected_cases:
-        case_str = f"{case_id:04d}"
+        case_str = f"{case_id:03d}"
         input_file = os.path.join(input_dir, case_str + ".txt")
         output_file = os.path.join(output_dir, case_str + ".txt")
         if not os.path.exists(input_file):

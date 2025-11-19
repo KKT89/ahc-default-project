@@ -30,7 +30,7 @@ def main_with_params(L: int, R: int):
     total_cases = R - L
     for i in range(total_cases):
         src_path = os.path.join(tmp_dir, f"{i:04d}.txt")
-        new_file_name = f"{L + i:04d}.txt"
+        new_file_name = f"{L + i:03d}.txt"
         dst_path = os.path.join(in_dir, new_file_name)
         if os.path.exists(src_path):
             os.rename(src_path, dst_path)

@@ -64,7 +64,12 @@ Optuna 実行時は、`main.cpp` からこれらを自動抽出して study デ�
 
 ```
 $ uv run ahc-tester/run_test.py
+$ uv run ahc-tester/run_test.py --cases 5
+$ uv run ahc-tester/run_test.py --range 10 20
 ```
+
+- `--cases` で実行件数を指定できます（省略時は `config.toml` の `pretest_count`）。
+- `--range L R` で seed ID が `[L, R)` のケースだけ実行できます（`--cases` とは同時指定不可）。
 
 ### optuna
 
