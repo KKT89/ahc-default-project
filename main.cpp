@@ -358,7 +358,7 @@ int main() {
     ios::sync_with_stdio(false);
     cin.tie(nullptr);
     constexpr bool DEBUG = false;
-    constexpr double TIME_LIMIT = 180;
+    constexpr double TIME_LIMIT = 1800;
     timer::timer(true);
     input();
 

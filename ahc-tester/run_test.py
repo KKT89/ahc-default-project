@@ -4,15 +4,35 @@ import config_util as config_util
 import subprocess
 import time
 import os
+import json
+from concurrent.futures import ThreadPoolExecutor
 
+# ファイルパス定義
+BEST_SCORES_FILE = "best_scores.json" # 理論値（全期間ベスト）
+PREV_SCORES_FILE = "prev_scores.json" # 直近の提出
 
-def failure_score(objective: str) -> int:
-    if objective == "maximize":
-        return -1
-    if objective == "minimize":
-        return 10 ** 9
-    raise ValueError(f"Unsupported objective: {objective}")
+def load_scores(filepath):
+    if os.path.exists(filepath):
+        try:
+            with open(filepath, "r") as f:
+                return json.load(f)
+        except json.JSONDecodeError:
+            return {}
+    return {}
 
+def save_scores(scores, filepath):
+    with open(filepath, "w") as f:
+        json.dump(scores, f, indent=4)
+
+def prompt_yes_no(message: str) -> bool:
+    """Simple Y/N prompt for interactive confirmation."""
+    while True:
+        user_input = input(f"{message} [y/n]: ").strip().lower()
+        if user_input in ("y", "yes"):
+            return True
+        if user_input in ("n", "no"):
+            return False
+        print("Please enter 'y' or 'n'.")
 
 def run_test_case(
     case_str,
@@ -21,66 +41,79 @@ def run_test_case(
     solution_file,
     vis_file,
     score_prefix,
-    fail_score,
 ):
     cmd_cpp = [solution_file]
-
     start_time = time.perf_counter()
-    with open(input_file, "r") as fin, open(output_file, "w") as fout:
-        subprocess.run(
-            cmd_cpp,
-            stdin=fin,
-            stdout=fout,
+    
+    # 実行
+    err_file = os.path.splitext(output_file)[0] + ".err"
+
+    try:
+        with open(input_file, "r") as fin, open(output_file, "w") as fout, open(err_file, "w") as ferr:
+            subprocess.run(
+                cmd_cpp,
+                stdin=fin,
+                stdout=fout,
+                stderr=ferr,
+                text=True,
+                check=True,
+            )
+        elapsed_time_ms = (time.perf_counter() - start_time) * 1000.0
+        status = "AC"
+    except subprocess.CalledProcessError:
+        elapsed_time_ms = (time.perf_counter() - start_time) * 1000.0
+        status = "RE"
+        return {
+            "case": case_str,
+            "score": None,
+            "elapsed_time": elapsed_time_ms,
+            "status": status,
+        }
+
+    # ビジュアライザ実行
+    try:
+        res = subprocess.run(
+            [vis_file, input_file, output_file],
+            stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
             text=True,
             check=False,
         )
+    except Exception:
+        status = "WA"
+        score = None
 
-    elapsed_time_ms = (time.perf_counter() - start_time) * 1000.0
+    score = None
+    if status == "AC":
+        for line in res.stdout.splitlines():
+            line = line.strip()
+            if line.startswith(score_prefix):
+                try:
+                    score = int(line.split("=")[-1].strip())
+                except Exception:
+                    score = None
+                break
 
-    res = subprocess.run(
-        [vis_file, input_file, output_file],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.DEVNULL,
-        text=True,
-        check=False,
-    )
-
-    score = fail_score
-    for line in res.stdout.splitlines():
-        line = line.strip()
-        if line.startswith(score_prefix):
-            try:
-                score = int(line.split("=")[-1].strip())
-            except Exception:
-                score = fail_score
-            break
+    if status == "AC" and score is None:
+        status = "WA"
+    if status == "AC" and score == 0:
+        status = "WA"
+        score = None
 
     return {
         "case": case_str,
         "score": score,
         "elapsed_time": elapsed_time_ms,
+        "status": status,
     }
-
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Run local tests for AHC submissions.")
-    parser.add_argument(
-        "--cases",
-        type=int,
-        default=None,
-        help="Number of test cases to run (default: value from config, typically 150).",
-    )
-    parser.add_argument(
-        "--range",
-        nargs=2,
-        metavar=("L", "R"),
-        type=int,
-        default=None,
-        help="Run cases with seed IDs in [L, R).",
-    )
+    parser.add_argument("--cases", type=int, default=None, help="Number of test cases to run.")
+    parser.add_argument("--range", nargs=2, metavar=("L", "R"), type=int, default=None, help="Run cases with seed IDs in [L, R).")
+    parser.add_argument("--jobs", type=int, default=8, help="Number of worker threads.")
+    parser.add_argument("--debug", action="store_true", help="Skip confirmations and overwrite prev scores directly.")
     return parser.parse_args()
-
 
 def main():
     args = parse_args()
@@ -88,7 +121,6 @@ def main():
     if args.range is not None and args.cases is not None:
         raise ValueError("--range and --cases cannot be used together.")
 
-    # コンパイル
     config = config_util.load_config()
     build.compile_program(config)
 
@@ -99,7 +131,6 @@ def main():
     vis_file = os.path.join(work_dir, config["files"]["vis_file"])
     score_prefix = config["problem"]["score_prefix"]
     objective = config["problem"]["objective"]
-    fail_score = failure_score(objective)
     os.makedirs(output_dir, exist_ok=True)
 
     available_cases = sorted(
@@ -107,91 +138,215 @@ def main():
         for fname in os.listdir(input_dir)
         if fname.endswith(".txt") and os.path.splitext(fname)[0].isdigit()
     )
-    if not available_cases:
-        raise FileNotFoundError(f"No input cases were found under {input_dir}")
     
-    # テストケースの実行結果
     if args.range is not None:
         l_seed, r_seed = args.range
-        if l_seed < 0 or r_seed <= l_seed:
-            raise ValueError("--range requires integers with 0 <= L < R.")
-        selected_cases = [
-            case_id for case_id in available_cases if l_seed <= case_id < r_seed
-        ]
-        if not selected_cases:
-            raise ValueError(
-                f"No cases found in the requested range [{l_seed}, {r_seed})."
-            )
+        selected_cases = [c for c in available_cases if l_seed <= c < r_seed]
         testcase_count = len(selected_cases)
     else:
         config_case_count = config["problem"]["pretest_count"]
-        if args.cases is None:
-            requested_count = config_case_count
-        else:
-            if args.cases <= 0:
-                raise ValueError("--cases must be positive.")
-            requested_count = args.cases
-
+        requested_count = args.cases if args.cases is not None else config_case_count
         testcase_count = min(requested_count, len(available_cases))
-        if requested_count > len(available_cases):
-            print(
-                f"Warning: requested {requested_count} cases but only {len(available_cases)} available. "
-                f"Using {testcase_count} cases."
-            )
         selected_cases = available_cases[:testcase_count]
 
-    wrong_answer_count = 0
-    results = []
+    # --- スコア読み込み ---
+    best_scores_map = load_scores(BEST_SCORES_FILE)
+    prev_scores_map = load_scores(PREV_SCORES_FILE)
+    current_scores_map = {} 
 
+    results = []
+    total_diff_prev = 0 # Submit比の累積
+    total_diff_best = 0 # 理論値比の累積
+    wa_count = 0
+    
+    cases_to_run = []
     for case_id in selected_cases:
         case_str = f"{case_id:03d}"
         input_file = os.path.join(input_dir, case_str + ".txt")
         output_file = os.path.join(output_dir, case_str + ".txt")
-        if not os.path.exists(input_file):
-            print(f"Error: {input_file} was not found.")
-            continue
-        result = run_test_case(
-            case_str,
-            input_file,
-            output_file,
-            solution_file,
-            vis_file,
-            score_prefix,
-            fail_score,
-        )
-        score = result['score']
-        if score == fail_score:
-            wrong_answer_count += 1
-            print(f"Error: {result['case']} failed to get score.")
-            continue
-        results.append(result)
-        print(f"seed:{result['case']}  score:{result['score']:,d}  ({result['elapsed_time']:.2f} ms)")
+        cases_to_run.append((case_id, case_str, input_file, output_file))
 
-    if len(results) == 0:
-        print("No results to display.")
-        exit(0)
+    # --- カラーコード定義 ---
+    C_RESET  = "\033[0m"
+    C_RED    = "\033[31m"
+    C_GREEN  = "\033[32m"
+    C_GOLD   = "\033[33;1m"
+
+    # --- 色付けヘルパー関数 ---
+    def format_diff(diff, is_new_record=False, width=8):
+        if diff is None:
+            return " " * width # 比較対象がない場合
+        
+        val_str = f"{diff:+d}"
+        padded_str = f"{val_str:<{width}}"
+        
+        if is_new_record:
+            return f"{C_GOLD}{padded_str}{C_RESET}"
+        
+        # 改善判定
+        is_improvement = False
+        is_degradation = False
+        
+        if diff != 0:
+            if objective == "maximize":
+                if diff > 0: is_improvement = True
+                else: is_degradation = True
+            elif objective == "minimize":
+                if diff < 0: is_improvement = True
+                else: is_degradation = True
+        
+        if is_improvement:
+            return f"{C_GREEN}{padded_str}{C_RESET}"
+        elif is_degradation:
+            return f"{C_RED}{padded_str}{C_RESET}"
+        else:
+            return padded_str
+
+    def format_sum(total_val, width=8):
+        val_str = f"{total_val:+d}"
+        padded_str = f"{val_str:<{width}}"
+        
+        is_good = False
+        if objective == "maximize":
+            is_good = (total_val >= 0)
+        else:
+            is_good = (total_val <= 0)
+            
+        if is_good:
+            return f"{C_GREEN}{padded_str}{C_RESET}"
+        else:
+            return f"{C_RED}{padded_str}{C_RESET}"
+
+
+    futures_list = []
+    max_workers = args.jobs if args.jobs > 0 else 1
+
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        for case_id, case_str, input_file, output_file in cases_to_run:
+            fut = executor.submit(
+                run_test_case,
+                case_str,
+                input_file,
+                output_file,
+                solution_file,
+                vis_file,
+                score_prefix,
+            )
+            futures_list.append((fut, case_id, case_str))
+
+        # ヘッダー出力（幅調整）
+        # vsPrev, SumPrev, vsBest, SumBest の順
+        print(f"{'Case':<5} {'Score':<10} {'Time':<6} {'Stat':<5} | {'vsPrev':<8} {'Sum':<8} | {'vsBest':<8} {'Sum':<8}")
+        print("-" * 75)
+
+        for fut, case_id, case_str in futures_list:
+            try:
+                result = fut.result()
+            except Exception as exc:
+                print(f"Error: case {case_str} exception: {exc}")
+                continue
+
+            current_score = result["score"]
+            if result["status"] == "WA":
+                wa_count += 1
+            
+            # 保存用
+            if result["status"] == "AC" and current_score is not None:
+                current_scores_map[case_str] = current_score
+
+            # --- Diff計算 ---
+            old_prev = prev_scores_map.get(case_str)
+            old_best = best_scores_map.get(case_str)
+            
+            if result["status"] == "AC" and current_score is not None:
+                diff_prev = (current_score - old_prev) if old_prev is not None else 0
+                diff_best = (current_score - old_best) if old_best is not None else 0
+            else:
+                diff_prev = None if old_prev is not None else 0
+                diff_best = None if old_best is not None else 0
+            
+            # 初回(記録なし)の場合はDiffを0として計算に含めるか、あるいは表示だけ変えるか
+            # ここでは計算には含める（0扱い）
+            
+            if diff_prev is not None:
+                total_diff_prev += diff_prev
+            if diff_best is not None:
+                total_diff_best += diff_best
+
+            # --- Best更新判定 ---
+            is_new_best = False
+            should_update_best = False
+            
+            if result["status"] == "AC" and current_score is not None:
+                if old_best is None:
+                    should_update_best = True
+                    is_new_best = True
+                elif objective == "maximize" and current_score > old_best:
+                    should_update_best = True
+                    is_new_best = True
+                elif objective == "minimize" and current_score < old_best:
+                    should_update_best = True
+                    is_new_best = True
+            
+            if should_update_best:
+                best_scores_map[case_str] = current_score
+
+            # --- 表示 ---
+            p_case   = f"{result['case']:<5}"
+            if result["status"] == "AC":
+                p_score = f"{result['score']:<10,d}"
+            else:
+                p_score = f"{'-':<10}"
+            p_time   = f"{result['elapsed_time']:<6.0f}" # 小数点なしで短く
+            p_status = f"{result['status']:<5}"
+
+            # Diff Prev (NewBestならPrev比較でもGoldにするかは好みだが、Prev比較はGreenでいいかも。今回はBest更新ならPrevもGoldにしてみる)
+            prev_str = format_diff(diff_prev if old_prev is not None else None, is_new_record=is_new_best, width=8)
+            prev_sum_str = format_sum(total_diff_prev, width=8)
+            
+            # Diff Best (NewBestならGold)
+            best_str = format_diff(diff_best if old_best is not None else None, is_new_record=is_new_best, width=8)
+            best_sum_str = format_sum(total_diff_best, width=8)
+            
+            # NEWの文字上書き
+            if old_prev is None:
+                if result["status"] == "AC":
+                    prev_str = f"{'NEW':<8}"
+                else:
+                    prev_str = f"{'-':<8}"
+            if old_best is None:
+                if result["status"] == "AC":
+                    best_str = f"{C_GOLD}{'NEW':<8}{C_RESET}"
+                else:
+                    best_str = f"{'-':<8}"
+
+            print(f"{p_case} {p_score} {p_time} {p_status} | {prev_str} {prev_sum_str} | {best_str} {best_sum_str}")
+
+            results.append(result)
+
+    if not results:
+        return
+
+    total_score = sum(r['score'] for r in results if r.get('status') == "AC" and r.get('score') is not None)
     
-    # スコアの合計と平均を計算
-    total_score = sum(result['score'] for result in results)
-    avg_score = total_score / len(results)
-
-    # 最大実行時間を取得
-    max_time_result = max(results, key=lambda r: r['elapsed_time'])
-    max_time = max_time_result['elapsed_time']
-    max_time_case = max_time_result['case']
-
-    print(f"----- All test cases finished (total {testcase_count}) -----")
-    print(f"Wrong Answers: {wrong_answer_count} / {testcase_count}")
-    print(f"Maximum Execution Time: {max_time:.2f} ms (case: {max_time_case})")
+    print("-" * 75)
     print(f"Total Score: {total_score:,d}")
-    print(f"Average Score: {avg_score:.2f}")
+    print(f"WA Count   : {wa_count}")
 
-    return {
-        "wrong_answers": wrong_answer_count,
-        "total_score": total_score,
-        "avg_score": avg_score,
-    }
+    # Bestは常に保存
+    save_scores(best_scores_map, BEST_SCORES_FILE)
 
+    # Prev更新：デフォルトは確認してから保存。--debug のときは保存自体をスキップ。
+    if not current_scores_map:
+        print("No AC results to save. Skipped updating prev scores.")
+    elif not args.debug:
+        if prompt_yes_no(f"{C_GOLD}Save current results to {PREV_SCORES_FILE}?{C_RESET}"):
+            existing_prev = load_scores(PREV_SCORES_FILE)
+            existing_prev.update(current_scores_map)
+            save_scores(existing_prev, PREV_SCORES_FILE)
+            print(f"{C_GOLD}Saved current results to {PREV_SCORES_FILE}{C_RESET}")
+        else:
+            print("Skipped saving current results.")
 
 if __name__ == "__main__":
     main()
