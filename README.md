@@ -10,8 +10,6 @@ AHCxxx/                  // ルートディレクトリ
 
 ## 使い方
 
-ahc-tester の使い方は[こちら](https://github.com/KKT89/ahc-tester/blob/main/README.md)
-
 ### 事前準備
 
 以下をリポジトリ直下に配置した上で、次の初回セットアップを実行してください。
