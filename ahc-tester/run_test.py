@@ -8,8 +8,14 @@ import json
 from concurrent.futures import ThreadPoolExecutor
 
 # ファイルパス定義
-BEST_SCORES_FILE = "best_scores.json" # 理論値（全期間ベスト）
-PREV_SCORES_FILE = "prev_scores.json" # 直近の提出
+SCORE_DIR_NAME = "score"
+BEST_SCORES_FILENAME = "best_scores.json" # 理論値（全期間ベスト）
+PREV_SCORES_FILENAME = "prev_scores.json" # 直近の提出
+
+def score_file_path(filename: str, work_dir: str | None = None) -> str:
+    base_dir = work_dir if work_dir is not None else config_util.work_dir()
+    return os.path.join(base_dir, SCORE_DIR_NAME, filename)
+
 
 def load_scores(filepath):
     if os.path.exists(filepath):
@@ -125,6 +131,9 @@ def main():
     build.compile_program(config)
 
     work_dir = config_util.work_dir()
+    score_dir = os.path.join(work_dir, SCORE_DIR_NAME)
+    os.makedirs(score_dir, exist_ok=True)
+
     input_dir = os.path.join(work_dir, config["paths"]["testcase_input_dir"])
     output_dir = os.path.join(work_dir, config["paths"]["testcase_output_dir"])
     solution_file = os.path.join(work_dir, config["files"]["sol_file"])
@@ -132,6 +141,10 @@ def main():
     score_prefix = config["problem"]["score_prefix"]
     objective = config["problem"]["objective"]
     os.makedirs(output_dir, exist_ok=True)
+
+    best_scores_file = score_file_path(BEST_SCORES_FILENAME, work_dir)
+    prev_scores_file = score_file_path(PREV_SCORES_FILENAME, work_dir)
+    prev_scores_label = os.path.relpath(prev_scores_file, work_dir)
 
     available_cases = sorted(
         int(os.path.splitext(fname)[0])
@@ -150,8 +163,8 @@ def main():
         selected_cases = available_cases[:testcase_count]
 
     # --- スコア読み込み ---
-    best_scores_map = load_scores(BEST_SCORES_FILE)
-    prev_scores_map = load_scores(PREV_SCORES_FILE)
+    best_scores_map = load_scores(best_scores_file)
+    prev_scores_map = load_scores(prev_scores_file)
     current_scores_map = {} 
 
     results = []
@@ -334,17 +347,17 @@ def main():
     print(f"WA Count   : {wa_count}")
 
     # Bestは常に保存
-    save_scores(best_scores_map, BEST_SCORES_FILE)
+    save_scores(best_scores_map, best_scores_file)
 
     # Prev更新：デフォルトは確認してから保存。--debug のときは保存自体をスキップ。
     if not current_scores_map:
         print("No AC results to save. Skipped updating prev scores.")
     elif not args.debug:
-        if prompt_yes_no(f"{C_GOLD}Save current results to {PREV_SCORES_FILE}?{C_RESET}"):
-            existing_prev = load_scores(PREV_SCORES_FILE)
+        if prompt_yes_no(f"{C_GOLD}Save current results to {prev_scores_label}?{C_RESET}"):
+            existing_prev = load_scores(prev_scores_file)
             existing_prev.update(current_scores_map)
-            save_scores(existing_prev, PREV_SCORES_FILE)
-            print(f"{C_GOLD}Saved current results to {PREV_SCORES_FILE}{C_RESET}")
+            save_scores(existing_prev, prev_scores_file)
+            print(f"{C_GOLD}Saved current results to {prev_scores_label}{C_RESET}")
         else:
             print("Skipped saving current results.")
 
