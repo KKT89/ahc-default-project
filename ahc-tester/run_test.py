@@ -349,10 +349,12 @@ def main():
     # Bestは常に保存
     save_scores(best_scores_map, best_scores_file)
 
-    # Prev更新：デフォルトは確認してから保存。--debug のときは保存自体をスキップ。
+    # Prev更新：--range/--cases を指定しない通常実行時のみ確認。--debug のときは保存自体をスキップ。
+    ran_default = args.range is None and args.cases is None
+
     if not current_scores_map:
         print("No AC results to save. Skipped updating prev scores.")
-    elif not args.debug:
+    elif not args.debug and ran_default:
         if prompt_yes_no(f"{C_GOLD}Save current results to {prev_scores_label}?{C_RESET}"):
             existing_prev = load_scores(prev_scores_file)
             existing_prev.update(current_scores_map)
