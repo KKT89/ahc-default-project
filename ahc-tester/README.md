@@ -4,11 +4,7 @@ AtCoder Heuristic Contest (AHC) で使用しているツール群です。
 ## 使い方
 
 ### Python環境
-以下はルートディレクトリで実行します。
-```
-$ uv venv .venv
-$ uv pip install -r ahc-tester/requirements.txt
-```
+ルートディレクトリで `uv sync` を実行すると、`pyproject.toml` / `uv.lock` に基づいて `.venv` が自動生成されます。
 
 ### セットアップ
 プロジェクトルートに設定ファイル `config.toml` を作成し、公式ローカルテストツールのビルドを実行します。

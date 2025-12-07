@@ -1,9 +1,8 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-# Quick setup script (uv-first, requirements required)
-# - Create venv with `uv venv .venv`
-# - Install deps from ahc-tester/requirements.txt (required)
+# Quick setup script (uv-managed, pyproject/uv.lock ベース)
+# - 依存解決は `uv sync` にまとめて任せる（.venv の事前作成は不要）
 # - Run setup: `uv run ahc-tester/setup.py <objective> [-i]`
 #   - objective (required): max|min|maximize|minimize
 #   - -i/--interactive (optional): interactive problem flag
@@ -11,8 +10,6 @@ set -Eeuo pipefail
 here_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd "${here_dir}/.." && pwd)"
 cd "${repo_root}"
-
-req_file="ahc-tester/requirements.txt"
 
 info() { printf "[info] %s\n" "$*"; }
 err()  { printf "[error] %s\n" "$*" >&2; }
@@ -74,19 +71,16 @@ if ! command -v uv >/dev/null 2>&1; then
   exit 1
 fi
 
-if [[ ! -f "${req_file}" ]]; then
-  err "Requirements file not found: ${req_file}"
-  exit 1
+sync_cmd=(uv sync)
+if [[ -f "${repo_root}/uv.lock" ]]; then
+  info "Syncing dependencies from uv.lock (--frozen)"
+  sync_cmd+=(--frozen)
+else
+  info "Resolving and installing dependencies with uv sync"
 fi
-
-info "Creating virtual environment (.venv) with uv"
-uv venv .venv
-
-info "Installing dependencies from ${req_file}"
-uv pip install -r "${req_file}"
+"${sync_cmd[@]}"
 
 cmd=(uv run ahc-tester/setup.py "$objective")
 if $interactive; then cmd+=("-i"); fi
 info "Running setup: ${cmd[*]}"
 "${cmd[@]}"
-

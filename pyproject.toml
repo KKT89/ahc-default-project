@@ -1,0 +1,10 @@
+[project]
+name = "ahc-tester"
+version = "0.1.0"
+description = "Local tooling for AtCoder Heuristic Contest projects"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "numpy>=1.26,<2.0",
+    "optuna>=3.6,<4.0",
+]
