@@ -11,12 +11,15 @@ __pycache__/
 ## CMake
 cmake-build-debug/
 
-## Generated sources/config
-combined.cpp
+## Generated artifacts
+config.toml
 solution
 vis.html
+gen
+vis
+tester
 
-## Data/logs
+## Data / logs
 out/
 tools/in/
 tools/target/
