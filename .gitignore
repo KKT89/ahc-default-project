@@ -20,6 +20,7 @@ vis
 tester
 
 ## Data / logs
+in/
 out/
 tools/in/
 tools/target/
