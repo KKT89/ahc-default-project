@@ -9,7 +9,7 @@ constexpr double TIME_LIMIT = 1800;
 namespace timer {
 constexpr double time_scale = 1.0;
 // return in ms
-int timer(bool reset = false) {
+int get_time(bool reset = false) {
     static auto st = chrono::steady_clock::now();
     if (reset) {
         st = chrono::steady_clock::now();
@@ -25,7 +25,5 @@ int timer(bool reset = false) {
 int main() {
     ios::sync_with_stdio(false);
     cin.tie(nullptr);
-    constexpr bool DEBUG = false;
-    constexpr double TIME_LIMIT = 1800;
-    timer::timer(true);
+    timer::get_time(true);
 }
