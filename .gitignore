@@ -22,5 +22,6 @@ tester
 ## Data / logs
 in/
 out/
+score/
 tools/in/
 tools/target/
