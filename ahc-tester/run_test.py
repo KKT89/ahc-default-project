@@ -55,7 +55,7 @@ def aggregate_trial_results(case_str: str, trial_results: list[dict], objective:
     total_elapsed = sum(float(r.get("elapsed_time", 0.0)) for r in trial_results)
     ac_trials = [r for r in trial_results if str(r.get("status", "")).startswith("AC") and r.get("score") is not None]
 
-    if ac_trials:
+    if ac_trials and len(ac_trials) == len(trial_results):
         # 乱数ぶれの下振れを見るため、目的関数に対して「悪い側」を代表値に採用する。
         # maximize 問題: score が小さいほど悪い -> min
         # minimize 問題: score が大きいほど悪い -> max
@@ -63,14 +63,20 @@ def aggregate_trial_results(case_str: str, trial_results: list[dict], objective:
             best = max(ac_trials, key=lambda x: int(x["score"]))
         else:
             best = min(ac_trials, key=lambda x: int(x["score"]))
-        status = "AC"
-        if len(ac_trials) < len(trial_results):
-            status = "AC*"
         return {
             "case": case_str,
             "score": int(best["score"]),
             "elapsed_time": total_elapsed,
-            "status": status,
+            "status": "AC",
+        }
+
+    # 1回でも失敗があればケース全体をWA扱いにする
+    if ac_trials:
+        return {
+            "case": case_str,
+            "score": None,
+            "elapsed_time": total_elapsed,
+            "status": "WA",
         }
 
     fallback_status = "WA"
@@ -224,7 +230,7 @@ def parse_args():
         dest="try_count",
         type=int,
         default=1,
-        help="Run each case multiple times and pick worst-side score by objective.",
+        help="Run each case multiple times; if any trial fails, treat that case as WA.",
     )
     parser.add_argument(
         "--debug",

@@ -42,14 +42,14 @@ $ bash scripts/init.sh -o max -i
 $ uv run ahc-tester/run_test.py            # config 上の全ケース（既定 150 件）を実行
 $ uv run ahc-tester/run_test.py --cases 5  # 冒頭 5 ケースだけ検証
 $ uv run ahc-tester/run_test.py --range 10 20  # seed が [10,20) のケースだけ実行
-$ uv run ahc-tester/run_test.py --try 5    # 各ケースを5回実行し、目的関数に対して悪い側のスコアを採用
+$ uv run ahc-tester/run_test.py --try 5    # 各ケースを5回実行（1回でも失敗したケースはWA扱い）
 $ uv run ahc-tester/run_test.py --debug    # ソルバを -DDEBUG 付きでビルド（prevスコア保存はスキップ）
 ```
 
 - `--cases` を省略すると `config.toml` に設定された件数（デフォルト 150）を実行します。
 - 指定数が手元の入力ファイル数を超える場合は、利用可能な件数までに自動調整されます。
 - `--range L R` で seed ID が `[L, R)` にあるケースだけを実行できます（`--cases` と同時指定不可）。
-- `--try N`（`N >= 1`）を指定すると、各ケースを複数回実行して乱数ぶれを評価します。
+- `--try N`（`N >= 1`）を指定すると、各ケースを複数回実行して乱数ぶれを評価します。全試行がACのケースだけ、目的関数に対して悪い側のスコアを採用します（1回でも失敗したケースはWA扱い）。
 - `--debug` を指定すると、`main.cpp` は `-DDEBUG` 付きでコンパイルされます。
 
 ### テストケースの生成
