@@ -12,16 +12,13 @@ __pycache__/
 cmake-build-debug/
 
 ## Generated artifacts
-config.toml
 solution
 vis.html
-gen
-vis
-tester
 
 ## Data / logs
-in/
 out/
+optuna_work/**/*.txt
+optuna_work/**/*.err
 score/
 tools/in/
 tools/target/
