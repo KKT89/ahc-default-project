@@ -3,7 +3,7 @@ import config_util as config_util
 import subprocess
 import sys
 
-def compile_program(config):
+def compile_program(config, extra_flags=None):
     work_dir = config_util.work_dir()
 
     cpp_file_path = os.path.join(work_dir, config["files"]["cpp_file"])
@@ -14,6 +14,8 @@ def compile_program(config):
 
     cmd = ["g++", cpp_file_path]
     cmd += ["-O2"] # コンパイルオプション
+    if extra_flags:
+        cmd += list(extra_flags)
     cmd += ["-o", sol_file_path]
     print(f"Building: {config['files']['cpp_file']} -> {config['files']['sol_file']}")
 
