@@ -69,10 +69,6 @@ $ uv run ahc-tester/run_test.py --debug
 
 **出力列**
 
-```
-Case  Score      Time   Stat  | vsPrev   Sum      | vsBest   Sum      | vsPrevN  Sum
-```
-
 | 列 | 説明 |
 |----|------|
 | `vsPrev` | 前回提出スコアとの差分 |
