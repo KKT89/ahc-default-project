@@ -17,8 +17,8 @@ vis.html
 
 ## Data / logs
 out/
-optuna_work/**/*.txt
-optuna_work/**/*.err
-score/
 tools/in/
 tools/target/
+optuna_study.db-journal
+optuna_work/**/*.err
+optuna_work/**/*.txt
