@@ -14,11 +14,15 @@ cmake-build-debug/
 ## Generated artifacts
 solution
 vis.html
+tools/gen
+tools/vis
+tools/tester
 
 ## Data / logs
 out/
 tools/in/
 tools/target/
+tools/seeds.txt
 optuna_study.db-journal
 optuna_work/**/*.err
 optuna_work/**/*.txt

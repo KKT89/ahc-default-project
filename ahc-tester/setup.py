@@ -1,11 +1,10 @@
+import copy
 import os
 import subprocess
 import argparse
 
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-ROOT_DIR = os.path.abspath(os.path.join(SCRIPT_DIR, ".."))
-CONFIG_FILE_NAME = "config.toml"
-CONFIG_FILE = os.path.join(ROOT_DIR, CONFIG_FILE_NAME)
+ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+CONFIG_FILE = os.path.join(ROOT_DIR, "config.toml")
 
 DEFAULT_CONFIG = {
     "paths": {
@@ -18,9 +17,9 @@ DEFAULT_CONFIG = {
         "cpp_file": "main.cpp",                             # メインのソースファイル
         "combined_file": "combined.cpp",                    # 結合後のソースファイル
         "sol_file": "solution",                             # コンパイルしたプログラムの名前
-        "gen_file": "gen",                                  # テストケース生成プログラムの名前
-        "vis_file": "vis",                                  # ビジュアライズプログラムの名前
-        "tester_file": "tester",                            # テスタープログラムの名前
+        "gen_file": "tools/gen",                            # テストケース生成プログラムの名前
+        "vis_file": "tools/vis",                            # ビジュアライズプログラムの名前
+        "tester_file": "tools/tester",                      # テスタープログラムの名前
         "optuna_db_file": "optuna_study.db",                # Optuna 用のデータベースファイル
         "optuna_params_file": "params.json",                # Optuna 用パラメータ定義ファイル
     },
@@ -33,9 +32,9 @@ DEFAULT_CONFIG = {
 }
 
 
-def _toml_dump(data, path):
+def _write_config(cfg, path):
     lines = []
-    for section, values in data.items():
+    for section, values in cfg.items():
         lines.append(f"[{section}]\n")
         for k, v in values.items():
             if isinstance(v, bool):
@@ -48,65 +47,51 @@ def _toml_dump(data, path):
         lines.append("\n")
     with open(path, "w", encoding="utf-8") as f:
         f.writelines(lines)
-
-
-def create_config_file(cfg, config_path):
-    _toml_dump(cfg, config_path)
-    print(f"{config_path} has been overwritten successfully!\n")
+    print(f"{path} has been overwritten successfully!\n")
 
 
 def build_tools_with_cargo(cfg):
-    work_dir = ROOT_DIR
-    tools_dir = cfg["paths"]["tools_dir"]
-    tools_path = os.path.join(work_dir, tools_dir)
+    tools_path = os.path.join(ROOT_DIR, cfg["paths"]["tools_dir"])
     cargo_manifest_path = os.path.join(tools_path, "Cargo.toml")
 
-    # cargo_mainfest_path が存在しない場合はエラー
     if not os.path.exists(cargo_manifest_path):
         print(f"Error: {cargo_manifest_path} does not exist.")
         exit(1)
-    
-    # 最新のコンパイラに更新
-    update_cmd = ["rustup", "update"]
+
     print("Running rustup update ...")
-    update_result = subprocess.run(update_cmd, capture_output=True, text=True, cwd=work_dir)
-    
-    if update_result.returncode == 0:
-        print("rustup update succeeded.\n")
-    else:
+    result = subprocess.run(["rustup", "update"], capture_output=True, text=True, cwd=ROOT_DIR)
+    if result.returncode != 0:
         print("rustup update failed.")
-        print(update_result.stderr)
+        print(result.stderr)
         exit(1)
-    
-    # 各種ツールをビルド
+    print("rustup update succeeded.\n")
+
     binary_list = [cfg["files"]["gen_file"], cfg["files"]["vis_file"]]
     if cfg["problem"]["interactive"]:
         binary_list.append(cfg["files"]["tester_file"])
-        
-    # 各バイナリについて cargo build を実行する
+
     for binary in binary_list:
+        binary_name = os.path.basename(binary)
         cmd = [
-            "cargo",
-            "build",
+            "cargo", "build",
             "--manifest-path", cargo_manifest_path,
             "-r",
-            "--bin", binary
+            "--bin", binary_name,
         ]
-        print(f"Running Cargo build command for {binary} ...")
-        result = subprocess.run(cmd, capture_output=True, text=True, cwd=work_dir)
-    
-        if result.returncode == 0:
-            print(f"Cargo build succeeded for {binary}.")
-            # ビルドしたバイナリを work_dir にコピー
-            binary_path = os.path.join(tools_path, "target", "release", binary)
-            dest_path = os.path.join(work_dir, binary)
-            if os.path.exists(dest_path):
-                os.remove(dest_path)
-            os.rename(binary_path, dest_path)
-            print(f"Copied {binary} to {work_dir}\n")
-        else:
-            print(f"Cargo build failed for {binary}.")
+        print(f"Running Cargo build command for {binary_name} ...")
+        result = subprocess.run(cmd, capture_output=True, text=True, cwd=ROOT_DIR)
+        if result.returncode != 0:
+            print(f"Cargo build failed for {binary_name}.")
             print(result.stderr)
+            exit(1)
+        print(f"Cargo build succeeded for {binary_name}.")
+        src = os.path.join(tools_path, "target", "release", binary_name)
+        dst = os.path.join(ROOT_DIR, binary)
+        if os.path.exists(dst):
+            os.remove(dst)
+        os.rename(src, dst)
+        print(f"Moved {binary_name} to {dst}\n")
+
 
 def _normalize_objective(obj: str) -> str:
     obj = obj.strip().lower()
@@ -122,45 +107,30 @@ def parse_args():
         description="Setup ahc-tester: write config.toml and build tools.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-
-    # objective
     parser.add_argument(
         "objective",
         choices=["max", "min", "maximize", "minimize"],
         help="Optimization direction: max/min (maximize/minimize)",
     )
-
-    # インタラクティブのときだけ -i を付ける（デフォルトは非インタラクティブ）
     parser.add_argument(
         "-i", "--interactive",
-        dest="interactive",
         action="store_true",
-        default=False,
         help="Problem is interactive (default: non-interactive)",
     )
-
     return parser.parse_args()
 
 
 def build_config_from_args(args) -> dict:
-    cfg = {**DEFAULT_CONFIG}
-    # Deep-copy nested dicts to avoid mutating DEFAULT_CONFIG
-    for k, v in DEFAULT_CONFIG.items():
-        if isinstance(v, dict):
-            cfg[k] = dict(v)
+    cfg = copy.deepcopy(DEFAULT_CONFIG)
     cfg["problem"]["objective"] = _normalize_objective(args.objective)
-    cfg["problem"]["interactive"] = bool(args.interactive)
+    cfg["problem"]["interactive"] = args.interactive
     return cfg
 
 
 def main():
     args = parse_args()
     cfg = build_config_from_args(args)
-
-    # 設定ファイルの作成（常に上書き）
-    create_config_file(cfg, CONFIG_FILE)
-
-    # Cargo を使ってツールをビルド
+    _write_config(cfg, CONFIG_FILE)
     build_tools_with_cargo(cfg)
 
 
