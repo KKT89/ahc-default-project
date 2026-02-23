@@ -21,37 +21,38 @@ AHCxxx/                  // ルートディレクトリ
 
 ```
 $ ./scripts/init.sh -o <max|min>
+$ ./scripts/init.sh -o <max|min> -i  # インタラクティブ問題の場合
 ```
 
-## ahc-tester
+### ahc-tester
 
 詳細は [ahc-tester/README.md](ahc-tester/README.md) を参照してください。
 
-### [セットアップ](ahc-tester/README.md#セットアップ)
+#### [セットアップ](ahc-tester/README.md#セットアップ)
 
 ```
 $ uv run ahc-tester/setup.py max
 ```
 
-### [テストケース作成](ahc-tester/README.md#テストケース作成)
+#### [テストケース作成](ahc-tester/README.md#テストケース作成)
 
 ```
 $ uv run ahc-tester/make_test.py L R
 ```
 
-### [ビルド](ahc-tester/README.md#ビルド)
+#### [ビルド](ahc-tester/README.md#ビルド)
 
 ```
 $ uv run ahc-tester/build.py
 ```
 
-### [テスト実行](ahc-tester/README.md#テスト実行)
+#### [テスト実行](ahc-tester/README.md#テスト実行)
 
 ```
 $ uv run ahc-tester/run_test.py
 ```
 
-### [optuna](ahc-tester/README.md#optuna)
+#### [optuna](ahc-tester/README.md#optuna)
 
 ```
 $ uv run ahc-tester/optuna_manager.py

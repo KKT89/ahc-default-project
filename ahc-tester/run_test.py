@@ -51,43 +51,6 @@ def effective_score_from_result(result: dict, objective: str, fail_score_minimiz
     return 1
 
 
-def aggregate_trial_results(case_str: str, trial_results: list[dict], objective: str) -> dict:
-    total_elapsed = sum(float(r.get("elapsed_time", 0.0)) for r in trial_results)
-    ac_trials = [r for r in trial_results if str(r.get("status", "")).startswith("AC") and r.get("score") is not None]
-
-    if ac_trials and len(ac_trials) == len(trial_results):
-        # 乱数ぶれの下振れを見るため、目的関数に対して「悪い側」を代表値に採用する。
-        # maximize 問題: score が小さいほど悪い -> min
-        # minimize 問題: score が大きいほど悪い -> max
-        if objective == "minimize":
-            best = max(ac_trials, key=lambda x: int(x["score"]))
-        else:
-            best = min(ac_trials, key=lambda x: int(x["score"]))
-        return {
-            "case": case_str,
-            "score": int(best["score"]),
-            "elapsed_time": total_elapsed,
-            "status": "AC",
-        }
-
-    # 1回でも失敗があればケース全体をWA扱いにする
-    if ac_trials:
-        return {
-            "case": case_str,
-            "score": None,
-            "elapsed_time": total_elapsed,
-            "status": "WA",
-        }
-
-    fallback_status = "WA"
-    if trial_results:
-        fallback_status = str(trial_results[0].get("status", "WA"))
-    return {
-        "case": case_str,
-        "score": None,
-        "elapsed_time": total_elapsed,
-        "status": fallback_status,
-    }
 
 def run_test_case(
     case_str,
@@ -192,46 +155,12 @@ def run_test_case(
     }
 
 
-def run_test_case_try(
-    case_str,
-    input_file,
-    output_file,
-    solution_file,
-    vis_file,
-    tester_file,
-    score_prefix,
-    interactive,
-    try_count,
-    objective,
-):
-    trials = []
-    for _ in range(try_count):
-        trials.append(
-            run_test_case(
-                case_str,
-                input_file,
-                output_file,
-                solution_file,
-                vis_file,
-                tester_file,
-                score_prefix,
-                interactive,
-            )
-        )
-    return aggregate_trial_results(case_str, trials, objective)
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Run local tests for AHC submissions.")
     parser.add_argument("--cases", type=int, default=None, help="Number of test cases to run.")
     parser.add_argument("--range", nargs=2, metavar=("L", "R"), type=int, default=None, help="Run cases with seed IDs in [L, R).")
     parser.add_argument("--jobs", type=int, default=8, help="Number of worker threads.")
-    parser.add_argument(
-        "--try",
-        dest="try_count",
-        type=int,
-        default=1,
-        help="Run each case multiple times; if any trial fails, treat that case as WA.",
-    )
     parser.add_argument(
         "--debug",
         action="store_true",
@@ -244,9 +173,6 @@ def main():
 
     if args.range is not None and args.cases is not None:
         raise ValueError("--range and --cases cannot be used together.")
-    if args.try_count <= 0:
-        raise ValueError("--try must be >= 1.")
-
     config = config_util.load_config()
     extra_flags = []
     if args.debug:
@@ -395,14 +321,10 @@ def main():
     futures_list = []
     max_workers = args.jobs if args.jobs > 0 else 1
 
-    if args.try_count > 1:
-        agg_mode = "max" if objective == "minimize" else "min"
-        print(f"Try mode: {args.try_count} runs/case, pick worst-side={agg_mode} by objective={objective}")
-
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         for case_id, case_str, input_file, output_file in cases_to_run:
             fut = executor.submit(
-                run_test_case_try,
+                run_test_case,
                 case_str,
                 input_file,
                 output_file,
@@ -411,8 +333,6 @@ def main():
                 tester_file,
                 score_prefix,
                 interactive,
-                args.try_count,
-                objective,
             )
             futures_list.append((fut, case_id, case_str))
 
