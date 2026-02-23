@@ -17,22 +17,16 @@ AHCxxx/                  // ルートディレクトリ
 - `task.html`：問題文のローカルコピー
 
 ### セットアップ
-以下のスクリプトで、`uv sync` による依存解決とツールのセットアップを一括実行します。
+以下のスクリプトで、依存解決・ツールのビルド・テストケース生成（seed 0〜149）を一括実行します。
 
 ```
 $ ./scripts/init.sh -o <max|min>
 $ ./scripts/init.sh -o <max|min> -i  # インタラクティブ問題の場合
 ```
 
-### ahc-tester
+### テスターツール
 
 詳細は [ahc-tester/README.md](ahc-tester/README.md) を参照してください。
-
-#### [セットアップ](ahc-tester/README.md#セットアップ)
-
-```
-$ uv run ahc-tester/setup.py max
-```
 
 #### [テストケース作成](ahc-tester/README.md#テストケース作成)
 

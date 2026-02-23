@@ -68,3 +68,6 @@ cmd=(uv run ahc-tester/setup.py "${objective}")
 $interactive && cmd+=("-i")
 info "Running setup: ${cmd[*]}"
 "${cmd[@]}"
+
+info "Generating test cases (seed 0..149)"
+uv run ahc-tester/make_test.py 0 150
