@@ -4,7 +4,7 @@ import json
 import numpy as np
 import os
 import optuna
-import config_util as config_util
+import config_util
 import shutil
 import sys
 import time
@@ -104,8 +104,7 @@ def objective(trial, input_dir, output_dir, sol_file, vis_file, score_prefix, pa
         rng = np.random.default_rng(seed_val)
         shuffled_ids = rng.permutation(np.arange(50))
     else:
-        all_test_numbers = np.arange(50)
-        shuffled_ids = np.random.permutation(all_test_numbers)
+        shuffled_ids = np.random.permutation(np.arange(50))
 
     results = []
     for instance_id in shuffled_ids:
@@ -115,22 +114,23 @@ def objective(trial, input_dir, output_dir, sol_file, vis_file, score_prefix, pa
         output_file = os.path.join(output_dir, uid + ".txt")
         if not os.path.exists(input_file):
             print(f"Error: {input_file} was not found.")
-            exit(1)
-        
+            sys.exit(1)
+
         # Optuna の各試行で得たパラメータを環境変数として子プロセスへ注入
         # Run solution with params injected via environment variables
         env = os.environ.copy()
         for k, v in params.items():
             env[f"{env_prefix}{k}"] = str(v)
-        subprocess.run(
-            [sol_file],
-            stdin=open(input_file, "r"),
-            stdout=open(output_file, "w"),
-            stderr=subprocess.DEVNULL,
-            text=True,
-            check=False,
-            env=env,
-        )
+        with open(input_file, "r") as fin, open(output_file, "w") as fout:
+            subprocess.run(
+                [sol_file],
+                stdin=fin,
+                stdout=fout,
+                stderr=subprocess.DEVNULL,
+                text=True,
+                check=False,
+                env=env,
+            )
         # Score via vis
         res = subprocess.run(
             [vis_file, input_file, output_file],
@@ -175,20 +175,17 @@ def main():
     parser.add_argument(
         "--dir",
         help="Directory to store study results.",
-        dest="dir",
-        default=None
+        default=None,
     )
     parser.add_argument(
         "--last",
         help="Use the most recent study directory under optuna work dir.",
         action="store_true",
-        dest="last"
     )
     parser.add_argument(
         "--zero",
         help="Run with n_trials = 0 (skip optimization).",
         action="store_true",
-        dest="zero"
     )
     args = parser.parse_args()
 
@@ -206,8 +203,8 @@ def main():
         if not subs:
             print(f"Error: no study directories found in {optuna_work_dir}", file=sys.stderr)
             sys.exit(1)
-        lastest = sorted(subs)[-1]
-        study_dir = os.path.join(optuna_work_dir, lastest)
+        latest = sorted(subs)[-1]
+        study_dir = os.path.join(optuna_work_dir, latest)
     elif args.dir:
         study_dir = args.dir
     else:

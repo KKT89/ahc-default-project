@@ -30,13 +30,16 @@ seed `L` 以上 `R` 未満のテストケースを生成し、`in/{seed:03d}.txt
 
 ```
 $ uv run ahc-tester/make_test.py L R
+$ uv run ahc-tester/make_test.py L R --in in2        # 出力先ディレクトリを指定
+$ uv run ahc-tester/make_test.py L R --M=4 --U=3     # gen へのオプションを追加
 ```
 
-**例**
+**オプション**
 
-```
-$ uv run ahc-tester/make_test.py 0 150   # seed 0〜149 を生成
-```
+| オプション | 説明 |
+|------------|------|
+| `--in DIR` | 出力ディレクトリを指定（省略時は config の `testcase_input_dir`） |
+| その他 | gen バイナリ固有のオプションをそのまま渡せます（例: `--M=4`, `--U=3`） |
 
 ## ビルド
 
