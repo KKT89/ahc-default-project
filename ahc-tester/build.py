@@ -1,7 +1,11 @@
 import os
-import config_util as config_util
+import config_util
 import subprocess
 import sys
+
+# オンラインジャッジ（AtCoder AHC）と同等のコンパイルオプション
+RELEASE_FLAGS = ["-DONLINE_JUDGE"]
+
 
 def compile_program(config, extra_flags=None):
     work_dir = config_util.work_dir()
@@ -12,8 +16,7 @@ def compile_program(config, extra_flags=None):
         print(f"Error: {cpp_file_path} was not found.")
         sys.exit(1)
 
-    cmd = ["g++", cpp_file_path]
-    cmd += ["-O2"] # コンパイルオプション
+    cmd = ["g++", cpp_file_path, "-O2"]
     if extra_flags:
         cmd += list(extra_flags)
     cmd += ["-o", sol_file_path]

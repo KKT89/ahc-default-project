@@ -58,7 +58,10 @@ $ uv run ahc-tester/build.py
 $ uv run ahc-tester/run_test.py
 $ uv run ahc-tester/run_test.py --cases 10
 $ uv run ahc-tester/run_test.py --range 0 50
+$ uv run ahc-tester/run_test.py --in in2      # 別ディレクトリのケースで実行（スコア保存なし）
 $ uv run ahc-tester/run_test.py --debug
+$ uv run ahc-tester/run_test.py --release
+$ uv run ahc-tester/run_test.py --no-save
 ```
 
 **オプション**
@@ -67,8 +70,11 @@ $ uv run ahc-tester/run_test.py --debug
 |------------|------|
 | `--cases N` | 実行件数を指定。省略時は `config.toml` の `pretest_count`（デフォルト 150） |
 | `--range L R` | seed が `[L, R)` のケースのみ実行。`--cases` と同時指定不可 |
+| `--in DIR` | 入力ディレクトリを上書き指定。スコアトラッキング（best/prev の読み書き）は無効化される |
 | `--jobs N` | 並列スレッド数（デフォルト 8） |
-| `--debug` | `-DDEBUG` 付きでビルド。prev スコアの保存プロンプトをスキップ |
+| `--debug` | `-DDEBUG` 付きでビルド |
+| `--release` | `-DONLINE_JUDGE` 付きでビルド |
+| `--no-save` | prev スコアの保存プロンプトをスキップ |
 
 **出力列**
 
@@ -76,7 +82,7 @@ $ uv run ahc-tester/run_test.py --debug
 |----|------|
 | `vsPrev` | 前回提出スコアとの差分 |
 | `vsBest` | 全期間ベストスコアとの差分 |
-| `vsPrevN` | 前回提出スコアとの差分（0〜1 に正規化） |
+| `vsPrevN` | 前回提出スコアとの差分（0〜1 に正規化）。ベスト更新時は新スコアを基準に正規化 |
 | `Sum` | 選択ケース全体の累積差分 |
 
 改善は緑、悪化は赤、ベスト更新は金色で表示します。
@@ -84,7 +90,8 @@ $ uv run ahc-tester/run_test.py --debug
 **スコアの保存**
 
 - `score/best_scores.json`：全期間ベストスコアを自動更新
-- `score/prev_scores.json`：`--range` / `--cases` を指定しない通常実行の終了時に、保存するか確認します（`--debug` 時はスキップ）
+- `score/prev_scores.json`：スコアトラッキングが有効な実行の終了時に保存するか確認します（`--no-save` 時はスキップ）
+- `best/<case>.out`：ベスト更新時にその出力ファイルを自動保存
 
 ## optuna
 
