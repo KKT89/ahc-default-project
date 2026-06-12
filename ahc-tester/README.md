@@ -54,7 +54,7 @@ BINS = {"N": [10, 12, 14, 16, 18, 20]}    # ビン境界（省略した軸は自
 
 - ビン境界 `[10, 12, 14, ...]` は `[10,12) [12,14) ...` を意味します（最後のビンのみ上端含む）
 - 派生統計量（グリッド密度など）が必要な場合は `extract()` を書き換えます
-- 抽出結果は `<入力ディレクトリ>/features.json` にキャッシュされます
+- 抽出結果は `<入力ディレクトリ>/features.json` へキャッシュします
 
 ```
 $ uv run ahc-tester/features.py           # 全ケース再抽出 + カテゴリ分布の表示
@@ -79,7 +79,7 @@ int main() {
 }
 ```
 
-- 環境変数 `AHC_FEATURES` が設定されているときだけ `feature <name> <value>` を出力して
+- 環境変数 `AHC_FEATURES` があるときだけ `feature <name> <value>` を出力して
   `exit(0)` します。通常実行・`ONLINE_JUDGE` ビルドでは何もしません
 - 派生統計量を Python と C++ で二重実装せずに済み、カテゴリ別展開（`meta::apply_params`）に
   渡す値と特徴量の定義が必ず一致します
@@ -98,7 +98,7 @@ $ uv run ahc-tester/build.py
 ## バンドル（提出用ファイル生成）
 
 ローカル `#include "..."` を再帰展開し、提出用の単一ファイルを生成します。
-システムヘッダ（`<...>`）はそのまま残り、同一ファイルの二重展開は除去されます。
+システムヘッダ（`<...>`）はそのまま残し、同一ファイルの二重展開は除去します。
 生成後は `-DONLINE_JUDGE` 付きで構文チェックします。
 
 ```
@@ -175,8 +175,8 @@ $ uv run ahc-tester/run_test.py main.cpp experiments/beam.cpp
 | `Sum` | 選択ケース全体の累積差分 |
 
 改善は緑、悪化は赤、ベスト更新は金色で表示します。
-`features.py` の `AXES` が設定されていれば、末尾にカテゴリ別の vsBest 集計表
-（セル = ベスト比の幾何平均とケース数）も表示されます。
+`features.py` の `AXES` を設定していれば、末尾にカテゴリ別の vsBest 集計表
+（セル = ベスト比の幾何平均とケース数）も表示します。
 
 **スコアの保存**
 
@@ -187,7 +187,7 @@ $ uv run ahc-tester/run_test.py main.cpp experiments/beam.cpp
 
 ## 複数解法の比較と結果の閲覧
 
-run_test に cpp を複数渡すと、それぞれをビルド・実行して比較表を出します。
+run_test に cpp を複数渡すと、それぞれをビルド・実行して比較表を表示します。
 
 ```
 $ uv run ahc-tester/run_test.py main.cpp experiments/beam.cpp
@@ -198,19 +198,19 @@ $ uv run ahc-tester/run_test.py solvers/greedy.cpp solvers/beam.cpp --tag g --ta
 - 解法別サマリ（Total / WA / MaxTime / mean(log) / 先頭解法を基準とした幾何平均比）
 - カテゴリ別の勝者表（セル = 勝者ラベルと次点との幾何平均比、先頭解法以外の勝ちは緑）
 
-バイナリは `bin/<ラベル>`、出力は `out/<ラベル>/` に分かれて保存されます。
+バイナリは `bin/<ラベル>` に、出力は `out/<ラベル>/` に分けて保存します。
 
 **variant 比較（同一バイナリの env 違い）**
 
-解法が `META_PARAM` の切替フラグとして 1 ファイルに統合された後は、
-ビルドは1回だけで環境変数の上書きセットを比較できます。
+解法を `META_PARAM` の切替フラグとして 1 ファイルに統合した後は、
+1回のビルドで環境変数の上書きセットを比較できます。
 
 ```
 $ uv run ahc-tester/run_test.py --variant STRATEGY=0 --variant STRATEGY=1
 $ uv run ahc-tester/run_test.py main.cpp --variant STRATEGY=1 --variant STRATEGY=1,T0=2.5
 ```
 
-- キーには自動で `HP_` プレフィックスが付きます（`STRATEGY=1` → `HP_STRATEGY=1`）
+- キーには自動で `HP_` プレフィックスを付けます（`STRATEGY=1` → `HP_STRATEGY=1`）
 - cpp を省略すると config の `cpp_file` を使います
 - カテゴリ別の勝者表で勝ち方を見て、そのまま `meta_params.json` の値に反映できます
 
@@ -226,7 +226,7 @@ $ uv run ahc-tester/report.py results/A.json    # 単独ランは vsBest のカ�
 | オプション | 説明 |
 |------------|------|
 | `--no-cases` | ケース別スコア表を省略 |
-| `--in DIR` | 特徴量参照用の入力ディレクトリを上書き（省略時は結果ファイルに記録されたもの） |
+| `--in DIR` | 特徴量参照用の入力ディレクトリを上書き（省略時は結果ファイルの記録値） |
 
 ## optuna
 
@@ -297,8 +297,8 @@ META_PARAM(type, name, default)            // 探索対象にしない切替フ�
 ```
 
 - 実行時は環境変数 `HP_{name}` から値を読み込みます（`ONLINE_JUDGE` ビルドでは定数化）
-- Optuna 実行時は `HP_PARAM` だけが自動抽出され、`params.json` に記録されます
-- `META_PARAM` は探索されませんが、カテゴリ別展開（下記）で値を切り替えられます
+- Optuna 実行時は `HP_PARAM` だけを自動抽出し、`params.json` に記録します
+- `META_PARAM` は探索対象に含めませんが、カテゴリ別展開（下記）で値を切り替えられます
 
 **例**
 
@@ -344,7 +344,7 @@ int main() {
 }
 ```
 
-- ローカルビルドでは環境変数（Optuna が注入した値）がカテゴリ別の値より優先されるため、
+- ローカルビルドでは環境変数（Optuna が注入した値）をカテゴリ別の値より優先するため、
   展開後も通常のチューニングがそのまま動きます
-- `ONLINE_JUDGE` ビルドではカテゴリ別の値がコードに焼き込まれ、環境変数は読まれません
+- `ONLINE_JUDGE` ビルドではカテゴリ別の値をコードに焼き込み、環境変数は読みません
 - 展開に使う軸は C++ 側でも実行時に計算できる特徴量に限ってください
