@@ -5,6 +5,7 @@ import config_util
 import features as features_mod
 import meta_report
 import report
+import re
 import shutil
 import subprocess
 import time
@@ -76,6 +77,7 @@ def run_test_case(
     tester_file,
     score_prefix,
     interactive,
+    env=None,
 ):
     cmd_cpp = [tester_file, solution_file] if interactive else [solution_file]
     start_time = time.perf_counter()
@@ -90,6 +92,7 @@ def run_test_case(
                 stderr=ferr,
                 text=True,
                 check=True,
+                env=env,
             )
         elapsed_time_ms = (time.perf_counter() - start_time) * 1000.0
         status = "AC"
@@ -224,7 +227,7 @@ def select_case_ids(args, config, input_dir):
     return available_cases[:min(requested_count, len(available_cases))]
 
 
-def save_run_results(config, work_dir, label, cpp_rel, input_dir, extra_flags, results_map):
+def save_run_results(config, work_dir, label, cpp_rel, input_dir, extra_flags, results_map, variant=None):
     """ラン結果を results/ に保存する(report.py で閲覧・比較できる)。"""
     results_dir = os.path.join(work_dir, config["paths"].get("results_dir", "results"))
     os.makedirs(results_dir, exist_ok=True)
@@ -236,6 +239,7 @@ def save_run_results(config, work_dir, label, cpp_rel, input_dir, extra_flags, r
         "input_dir": os.path.relpath(input_dir, work_dir),
         "objective": config["problem"]["objective"],
         "extra_flags": list(extra_flags),
+        "variant": variant,
         "results": results_map,
     }
     path = os.path.join(results_dir, f"{timestamp}_{label}.json")
@@ -256,8 +260,32 @@ def results_map_from_list(results):
     }
 
 
+def parse_variant_spec(spec, env_prefix="HP_"):
+    """--variant の "STRATEGY=1,T0=1.5" 形式を環境変数の上書き dict にする。"""
+    overlay = {}
+    for part in spec.split(","):
+        key, sep, val = part.partition("=")
+        key, val = key.strip(), val.strip()
+        if not sep or not key or not val:
+            raise ValueError(f"Invalid --variant: {spec} (expected KEY=VALUE[,KEY=VALUE...])")
+        env_key = key if key.startswith(env_prefix) else env_prefix + key
+        overlay[env_key] = val
+    return overlay
+
+
+def _dedup_label(base, used):
+    label, suffix = base, 2
+    while label in used:
+        label = f"{base}_{suffix}"
+        suffix += 1
+    return label
+
+
 def run_comparison(args, config, extra_flags):
-    """複数 cpp をビルド・実行して比較する。best/prev のスコアトラッキングは行わない。"""
+    """複数 cpp(または --variant の env セット)をビルド・実行して比較する。
+
+    best/prev のスコアトラッキングは行わない。
+    """
     work_dir = config_util.work_dir()
     input_dir = resolve_input_dir(args, config, work_dir)
     selected_cases = select_case_ids(args, config, input_dir)
@@ -265,20 +293,31 @@ def run_comparison(args, config, extra_flags):
         print("No cases to run.")
         return
 
-    cpp_list = args.cpps
-    if args.tag:
-        if len(args.tag) != len(cpp_list):
-            raise ValueError("--tag の個数は CPP ファイル数と一致させてください。")
-        labels = list(args.tag)
-    else:
+    cpp_list = args.cpps or [config["files"]["cpp_file"]]
+    variants = args.variant or []
+    if variants and len(cpp_list) > 1:
+        raise ValueError("--variant は単一の CPP ファイルとのみ併用できます。")
+
+    # 比較対象 jobs = (cpp, label, env 上書き, variant 文字列) のリスト
+    if variants:
+        if args.tag and len(args.tag) != len(variants):
+            raise ValueError("--tag の個数は --variant の個数と一致させてください。")
         labels = []
-        for cpp in cpp_list:
-            stem = os.path.splitext(os.path.basename(cpp))[0]
-            label, suffix = stem, 2
-            while label in labels:
-                label = f"{stem}_{suffix}"
-                suffix += 1
-            labels.append(label)
+        for i, spec in enumerate(variants):
+            base = args.tag[i] if args.tag else re.sub(r"[^A-Za-z0-9_.-]+", "-", spec).strip("-")
+            labels.append(_dedup_label(base, labels))
+        jobs = [
+            (cpp_list[0], label, parse_variant_spec(spec), spec)
+            for label, spec in zip(labels, variants)
+        ]
+    else:
+        if args.tag and len(args.tag) != len(cpp_list):
+            raise ValueError("--tag の個数は CPP ファイル数と一致させてください。")
+        labels = []
+        for i, cpp in enumerate(cpp_list):
+            base = args.tag[i] if args.tag else os.path.splitext(os.path.basename(cpp))[0]
+            labels.append(_dedup_label(base, labels))
+        jobs = [(cpp, label, None, None) for cpp, label in zip(cpp_list, labels)]
 
     output_root = os.path.join(work_dir, config["paths"]["testcase_output_dir"])
     vis_file = os.path.join(work_dir, config["files"]["vis_file"])
@@ -293,15 +332,23 @@ def run_comparison(args, config, extra_flags):
     ]
     selected_case_strs = [case_str for case_str, _ in cases_to_run]
 
+    built = {}  # cpp の絶対パス -> ビルド済みバイナリ(variant モードでは1回だけビルド)
     runs = []
-    for cpp, label in zip(cpp_list, labels):
+    for cpp, label, overlay, variant in jobs:
         cpp_path = cpp if os.path.isabs(cpp) else os.path.join(work_dir, cpp)
         if not os.path.exists(cpp_path):
             raise FileNotFoundError(f"CPP file not found: {cpp_path}")
-        sol_file = os.path.join(work_dir, "bin", label)
-        build.compile_program(config, extra_flags=extra_flags, cpp_file=cpp_path, sol_file=sol_file)
+        sol_file = built.get(cpp_path)
+        if sol_file is None:
+            bin_name = os.path.splitext(os.path.basename(cpp_path))[0] if variants else label
+            sol_file = os.path.join(work_dir, "bin", bin_name)
+            build.compile_program(config, extra_flags=extra_flags, cpp_file=cpp_path, sol_file=sol_file)
+            built[cpp_path] = sol_file
         out_dir = os.path.join(output_root, label)
         os.makedirs(out_dir, exist_ok=True)
+        env = None if overlay is None else {**os.environ, **overlay}
+        if variant is not None:
+            print(f"Variant {label}: {variant}")
 
         results_map = {}
         with ThreadPoolExecutor(max_workers=max(args.jobs, 1)) as executor:
@@ -317,6 +364,7 @@ def run_comparison(args, config, extra_flags):
                         tester_file,
                         score_prefix,
                         interactive,
+                        env,
                     ),
                     case_str,
                 )
@@ -345,7 +393,9 @@ def run_comparison(args, config, extra_flags):
 
         run = {"label": label, "cpp_file": os.path.relpath(cpp_path, work_dir), "results": results_map}
         runs.append(run)
-        save_run_results(config, work_dir, label, run["cpp_file"], input_dir, extra_flags, results_map)
+        save_run_results(
+            config, work_dir, label, run["cpp_file"], input_dir, extra_flags, results_map, variant=variant,
+        )
 
     print()
     report.render_comparison(runs, selected_case_strs, objective, input_dir, show_cases=len(runs) >= 2)
@@ -364,6 +414,13 @@ def parse_args():
         action="append",
         default=None,
         help="Label for saved results. Repeatable in compare mode (must match the number of CPP files).",
+    )
+    parser.add_argument(
+        "--variant",
+        action="append",
+        default=None,
+        metavar="KEY=V[,KEY=V...]",
+        help="Compare mode: run the same binary with HP_ env overrides (repeatable). e.g. --variant STRATEGY=0 --variant STRATEGY=1",
     )
     parser.add_argument("--cases", type=int, default=None, help="Number of test cases to run.")
     parser.add_argument("--range", nargs=2, metavar=("L", "R"), type=int, default=None, help="Run cases with seed IDs in [L, R).")
@@ -412,8 +469,8 @@ def main():
         extra_flags += RELEASE_FLAGS
         print(f"Release build enabled: {' '.join(RELEASE_FLAGS)}")
 
-    if args.cpps:
-        # 複数解法の比較モード
+    if args.cpps or args.variant:
+        # 複数解法(または同一バイナリの variant)の比較モード
         run_comparison(args, config, extra_flags)
         return
 
