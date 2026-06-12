@@ -40,14 +40,34 @@ $ uv run ahc-tester/make_test.py L R
 $ uv run ahc-tester/build.py
 ```
 
+#### [特徴量（メタデータ）](ahc-tester/README.md#特徴量メタデータ)
+
+```
+$ uv run ahc-tester/features.py
+```
+
 #### [テスト実行](ahc-tester/README.md#テスト実行)
 
 ```
 $ uv run ahc-tester/run_test.py
+$ uv run ahc-tester/run_test.py main.cpp experiments/beam.cpp   # 複数解法の比較
+```
+
+#### [結果の閲覧・比較](ahc-tester/README.md#複数解法の比較と結果の閲覧)
+
+```
+$ uv run ahc-tester/report.py results/A.json results/B.json
 ```
 
 #### [optuna](ahc-tester/README.md#optuna)
 
 ```
 $ uv run ahc-tester/optuna_manager.py
+$ uv run ahc-tester/optuna_manager.py --by-category   # カテゴリ別チューニング
+```
+
+#### [カテゴリ別パラメータのコード展開](ahc-tester/README.md#カテゴリ別パラメータのコード展開)
+
+```
+$ uv run ahc-tester/gen_meta_params.py
 ```
