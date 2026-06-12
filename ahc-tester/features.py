@@ -28,6 +28,11 @@ AXES: list = []
 # 省略した軸は自動ビン分け(distinct <= 8 なら値ごと、それ以外は5分位)。
 BINS: dict = {}
 
+# True にすると extract() の代わりにソリューションバイナリから特徴量を取得する。
+# main.cpp 側で入力読み込み直後に ahc::emit_features({...}) を呼んでおくこと
+# (lib/features.hpp 参照)。派生統計量を C++ と Python で二重実装せずに済む。
+USE_CPP_EXTRACTOR: bool = False
+
 
 def extract(input_path: str) -> dict:
     """1ケースの特徴量 dict を返す。
@@ -45,6 +50,54 @@ def extract(input_path: str) -> dict:
 # ==== 以下は通常編集不要 ====
 
 FEATURES_FILENAME = "features.json"
+
+
+def _cpp_solution_path(build_if_missing: bool = True) -> str:
+    """C++ 抽出に使うソリューションバイナリのパス。なければビルドする。"""
+    import build
+    import config_util
+
+    config = config_util.load_config()
+    work_dir = config_util.work_dir()
+    sol_path = os.path.join(work_dir, config["files"]["sol_file"])
+    if build_if_missing and not os.path.exists(sol_path):
+        build.compile_program(config)
+    return sol_path
+
+
+def extract_via_cpp(input_path: str, sol_path: str) -> dict:
+    """AHC_FEATURES=1 でバイナリを実行し、"feature <name> <value>" 行を回収する。"""
+    import subprocess
+
+    env = os.environ.copy()
+    env["AHC_FEATURES"] = "1"
+    try:
+        with open(input_path, "r") as fin:
+            res = subprocess.run(
+                [sol_path],
+                stdin=fin,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                env=env,
+                text=True,
+                timeout=30,
+            )
+    except subprocess.TimeoutExpired:
+        raise RuntimeError(
+            f"feature extraction timed out: {input_path} "
+            "(main.cpp で ahc::emit_features() を呼んでいるか確認)"
+        )
+    feats = {}
+    for line in res.stdout.splitlines():
+        parts = line.split()
+        if len(parts) == 3 and parts[0] == "feature":
+            feats[parts[1]] = _to_number(parts[2])
+    if not feats:
+        raise RuntimeError(
+            f"no features emitted for {input_path} "
+            "(main.cpp で ahc::emit_features() を呼んでいるか確認)"
+        )
+    return feats
 
 
 def _to_number(token: str):
@@ -87,12 +140,16 @@ def load_features(input_dir: str, case_strs=None, refresh: bool = False) -> dict
         case_strs = list_case_strs(input_dir)
 
     missing = [c for c in case_strs if c not in cache]
+    sol_path = _cpp_solution_path() if (USE_CPP_EXTRACTOR and missing) else None
     extracted = 0
     for case_str in missing:
         input_path = os.path.join(input_dir, case_str + ".txt")
         if not os.path.exists(input_path):
             continue
-        cache[case_str] = extract(input_path)
+        if USE_CPP_EXTRACTOR:
+            cache[case_str] = extract_via_cpp(input_path, sol_path)
+        else:
+            cache[case_str] = extract(input_path)
         extracted += 1
     if extracted > 0:
         with open(cache_path, "w") as f:
@@ -131,7 +188,11 @@ def main():
         print(f"Error: input directory not found: {input_dir}")
         sys.exit(1)
 
-    if not HEADER_NAMES and extract.__module__ == __name__:
+    if USE_CPP_EXTRACTOR:
+        # 抽出ロジックが変わっている可能性があるので CLI 実行時は必ずビルドし直す
+        import build
+        build.compile_program(config)
+    elif not HEADER_NAMES:
         print("Note: HEADER_NAMES が未設定です。features.py を編集してください。")
 
     feats = load_features(input_dir, refresh=True)
