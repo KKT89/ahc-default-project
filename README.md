@@ -40,6 +40,12 @@ $ uv run ahc-tester/make_test.py L R
 $ uv run ahc-tester/build.py
 ```
 
+#### [バンドル（提出用ファイル生成）](ahc-tester/README.md#バンドル提出用ファイル生成)
+
+```
+$ uv run ahc-tester/bundle.py
+```
+
 #### [特徴量（メタデータ）](ahc-tester/README.md#特徴量メタデータ)
 
 ```

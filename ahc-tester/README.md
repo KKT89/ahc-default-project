@@ -63,6 +63,29 @@ $ uv run ahc-tester/features.py --in in2
 
 設定を変更したら再実行してキャッシュを更新してください。
 
+### C++ 側での特徴量抽出
+
+`USE_CPP_EXTRACTOR = True` にすると、テキストパースの代わりにソリューションバイナリから
+特徴量を取得します。`main.cpp` 側で入力読み込み直後に `ahc::emit_features()` を呼んでおきます
+（`lib/features.hpp`）。
+
+```cpp
+#include "lib/features.hpp"
+
+int main() {
+    // 入力読み込み
+    ahc::emit_features({{"N", (double)N}, {"W", (double)W}, {"density", dens}});
+    // 以降通常の処理
+}
+```
+
+- 環境変数 `AHC_FEATURES` が設定されているときだけ `feature <name> <value>` を出力して
+  `exit(0)` します。通常実行・`ONLINE_JUDGE` ビルドでは何もしません
+- 派生統計量を Python と C++ で二重実装せずに済み、カテゴリ別展開（`meta::apply_params`）に
+  渡す値と特徴量の定義が必ず一致します
+- `features.py` の CLI 実行時は最新ソースで自動リビルドしてから抽出します
+- 文字列の特徴量が必要な場合はテキストパース（`extract()`）を使ってください
+
 ## ビルド
 
 `main.cpp` を `-O2` でコンパイルし、`solution` バイナリを生成します。
@@ -71,6 +94,41 @@ $ uv run ahc-tester/features.py --in in2
 ```
 $ uv run ahc-tester/build.py
 ```
+
+## バンドル（提出用ファイル生成）
+
+ローカル `#include "..."` を再帰展開し、提出用の単一ファイルを生成します。
+システムヘッダ（`<...>`）はそのまま残り、同一ファイルの二重展開は除去されます。
+生成後は `-DONLINE_JUDGE` 付きで構文チェックします。
+
+```
+$ uv run ahc-tester/bundle.py                              # cpp_file → combined.cpp
+$ uv run ahc-tester/bundle.py --cpp solvers/beam.cpp --out submit.cpp
+```
+
+**オプション**
+
+| オプション | 説明 |
+|------------|------|
+| `--cpp PATH` | バンドル対象のソース（デフォルトは config の `cpp_file`） |
+| `--out PATH` | 出力先（デフォルトは config の `combined_file` = `combined.cpp`） |
+| `--no-check` | g++ 構文チェックをスキップ |
+
+**推奨ディレクトリ規約**
+
+入力読み込み・タイマー・盤面などの共通実装はヘッダに切り出し、各解法から include します。
+
+```
+common/          // コンテスト固有の共通実装（input.hpp, state.hpp, ...）
+lib/             // テンプレート付属の汎用ヘッダ（hp_params.hpp, features.hpp, ...）
+solvers/
+  greedy.cpp     // #include "../common/input.hpp" + main()
+  beam.cpp
+main.cpp         // 本命解法
+```
+
+各解法 cpp は独立してビルドできるので、そのまま `run_test.py solvers/greedy.cpp solvers/beam.cpp`
+で比較でき、提出時は `bundle.py` で単一ファイル化します。
 
 ## テスト実行
 
@@ -104,7 +162,8 @@ $ uv run ahc-tester/run_test.py main.cpp experiments/beam.cpp
 | `--debug` | `-DDEBUG` 付きでビルド |
 | `--release` | `-DONLINE_JUDGE` 付きでビルド |
 | `--no-save` | prev スコアの保存プロンプトをスキップ |
-| `--tag LABEL` | 保存するラン結果のラベルを指定（比較モードでは cpp ごとに繰り返し指定） |
+| `--tag LABEL` | 保存するラン結果のラベルを指定（比較モードでは cpp / variant ごとに繰り返し指定） |
+| `--variant KEY=V[,...]` | 比較モード。同一バイナリを `HP_` 環境変数の上書き違いで実行（繰り返し指定） |
 
 **出力列**
 
@@ -132,7 +191,7 @@ run_test に cpp を複数渡すと、それぞれをビルド・実行して比
 
 ```
 $ uv run ahc-tester/run_test.py main.cpp experiments/beam.cpp
-$ uv run ahc-tester/run_test.py main.cpp main.cpp --tag old --tag new --release
+$ uv run ahc-tester/run_test.py solvers/greedy.cpp solvers/beam.cpp --tag g --tag b
 ```
 
 - ケース別スコア表（勝者に `*`）
@@ -140,6 +199,20 @@ $ uv run ahc-tester/run_test.py main.cpp main.cpp --tag old --tag new --release
 - カテゴリ別の勝者表（セル = 勝者ラベルと次点との幾何平均比、先頭解法以外の勝ちは緑）
 
 バイナリは `bin/<ラベル>`、出力は `out/<ラベル>/` に分かれて保存されます。
+
+**variant 比較（同一バイナリの env 違い）**
+
+解法が `META_PARAM` の切替フラグとして 1 ファイルに統合された後は、
+ビルドは1回だけで環境変数の上書きセットを比較できます。
+
+```
+$ uv run ahc-tester/run_test.py --variant STRATEGY=0 --variant STRATEGY=1
+$ uv run ahc-tester/run_test.py main.cpp --variant STRATEGY=1 --variant STRATEGY=1,T0=2.5
+```
+
+- キーには自動で `HP_` プレフィックスが付きます（`STRATEGY=1` → `HP_STRATEGY=1`）
+- cpp を省略すると config の `cpp_file` を使います
+- カテゴリ別の勝者表で勝ち方を見て、そのまま `meta_params.json` の値に反映できます
 
 保存済みのラン結果は `report.py` でいつでも再閲覧・比較できます。
 
