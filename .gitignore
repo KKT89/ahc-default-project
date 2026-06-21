@@ -13,6 +13,9 @@ cmake-build-debug/
 
 ## Generated artifacts
 solution
+bin/
+results/
+combined.cpp
 vis.html
 tools/gen
 tools/vis

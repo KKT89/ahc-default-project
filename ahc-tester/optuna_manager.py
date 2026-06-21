@@ -1,16 +1,18 @@
 import argparse
 import build
+import cpp_params
 import json
 import numpy as np
 import os
 import optuna
 import config_util
+import features as features_mod
+import meta_report
 import shutil
 import sys
 import time
 import uuid
 import warnings
-import re
 import subprocess
 from optuna.storages import RDBStorage
 from optuna.exceptions import ExperimentalWarning
@@ -41,60 +43,15 @@ def suggest_parameters(trial, json_file):
     return params
 
 
-def _extract_hp_params_from_cpp(cpp_path: str) -> dict:
-    """Parse HP_PARAM(type, name, def, low, high) from a C++ file.
-
-    Returns a params.json-like dict with integer_params and float_params.
-    Only simple numeric literals are supported. Others are skipped.
-    """
-    with open(cpp_path, "r", encoding="utf-8", errors="ignore") as f:
-        text = f.read()
-
-    pattern = re.compile(r"HP_PARAM\(\s*([^,]+)\s*,\s*([^,]+)\s*,\s*([^,]+)\s*,\s*([^,]+)\s*,\s*([^\)]+)\)")
-    ints, floats = [], []
-
-    def _to_num(s: str):
-        s = s.strip().rstrip(';')
-        # remove suffixes like f, F if any
-        try:
-            if re.match(r"^[+-]?\d+$", s):
-                return int(s)
-            return float(s)
-        except Exception:
-            return None
-
-    for m in pattern.finditer(text):
-        ty, name, d, lo, hi = (t.strip() for t in m.groups())
-        # sanitize name if it's like IDENT or qualified
-        name = re.sub(r"[^A-Za-z0-9_].*$", "", name)
-        v_def, v_lo, v_hi = _to_num(d), _to_num(lo), _to_num(hi)
-        if v_def is None or v_lo is None or v_hi is None:
-            continue
-        rec = {
-            "name": name,
-            "lower": v_lo,
-            "upper": v_hi,
-            "value": v_def,
-            "used": True,
-        }
-        ty_l = ty.replace("const", "").strip().lower()
-        if any(k in ty_l for k in ["double", "float"]):
-            floats.append(rec)
-        else:
-            ints.append(rec)
-
-    return {"integer_params": ints, "float_params": floats}
-
-
 def _write_params_json(data: dict, path: str) -> None:
     with open(path, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
 
 
-def objective(trial, input_dir, output_dir, sol_file, vis_file, score_prefix, param_json_file, env_prefix: str = "HP_"):
+def objective(trial, case_strs, input_dir, output_dir, sol_file, vis_file, score_prefix, param_json_file, env_prefix: str = "HP_"):
     params = suggest_parameters(trial, param_json_file)
 
-    # 固定順序（Prunerの影響を安定化）: 環境変数 OPTUNA_OBJECTIVE_SEED で制御
+    # 固定順序(Prunerの影響を安定化): 環境変数 OPTUNA_OBJECTIVE_SEED で制御
     seed_env = os.environ.get("OPTUNA_OBJECTIVE_SEED")
     if seed_env is not None:
         try:
@@ -102,13 +59,13 @@ def objective(trial, input_dir, output_dir, sol_file, vis_file, score_prefix, pa
         except Exception:
             seed_val = 0
         rng = np.random.default_rng(seed_val)
-        shuffled_ids = rng.permutation(np.arange(50))
+        order = rng.permutation(len(case_strs))
     else:
-        shuffled_ids = np.random.permutation(np.arange(50))
+        order = np.random.permutation(len(case_strs))
 
     results = []
-    for instance_id in shuffled_ids:
-        case_str = f"{instance_id:04d}"
+    for idx in order:
+        case_str = case_strs[int(idx)]
         input_file = os.path.join(input_dir, case_str + ".txt")
         uid = uuid.uuid4().hex[:8]
         output_file = os.path.join(output_dir, uid + ".txt")
@@ -158,13 +115,96 @@ def objective(trial, input_dir, output_dir, sol_file, vis_file, score_prefix, pa
             results.append(-1)
         else:
             results.append(score)
-        trial.report(score, step=int(instance_id))
+        trial.report(score, step=int(case_str))
         if trial.should_prune():
-            print(f"Trial pruned at instance {instance_id:04d} with intermediate avg score {sum(results) / len(results):.2f}")
+            print(f"Trial pruned at case {case_str} with intermediate avg score {sum(results) / len(results):.2f}")
             return sum(results) / len(results)
     avg_score = sum(results) / len(results)
     print(f"Trial finished. Params={params}, avg_score={avg_score:.2f}")
     return avg_score
+
+
+def parse_filters(filter_args):
+    """--filter の KEY=VALUE / KEY=LO..HI(両端含む)形式をパースする。"""
+    filters = []
+    for spec in filter_args or []:
+        key, sep, val = spec.partition("=")
+        key, val = key.strip(), val.strip()
+        if not sep or not key or not val:
+            raise ValueError(f"Invalid --filter: {spec} (expected KEY=VALUE or KEY=LO..HI)")
+        if ".." in val:
+            lo_s, hi_s = val.split("..", 1)
+            lo = features_mod._to_number(lo_s.strip())
+            hi = features_mod._to_number(hi_s.strip())
+            if isinstance(lo, str) or isinstance(hi, str):
+                raise ValueError(f"Invalid --filter range: {spec}")
+            filters.append((key, ("range", lo, hi)))
+        else:
+            filters.append((key, ("eq", features_mod._to_number(val))))
+    return filters
+
+
+def apply_filters(case_strs, features_by_case, filters):
+    selected = []
+    for case_str in case_strs:
+        feats = features_by_case.get(case_str)
+        if feats is None:
+            continue
+        ok = True
+        for key, cond in filters:
+            if key not in feats:
+                ok = False
+                break
+            v = feats[key]
+            if cond[0] == "range":
+                if isinstance(v, str) or not (cond[1] <= v <= cond[2]):
+                    ok = False
+                    break
+            else:
+                if v != cond[1] and str(v) != str(cond[1]):
+                    ok = False
+                    break
+        if ok:
+            selected.append(case_str)
+    return selected
+
+
+def optimize_study(storage, study_name, direction, objective_fn, n_trials, n_jobs):
+    study = optuna.create_study(
+        study_name=study_name,
+        storage=storage,
+        load_if_exists=True,
+        direction=direction,
+        pruner=optuna.pruners.WilcoxonPruner(p_threshold=0.1),
+    )
+    if n_trials > 0:
+        study.optimize(objective_fn, n_trials=n_trials, n_jobs=n_jobs)
+    return study
+
+
+def write_meta_params(config, work_dir, study_dir, axes, category_results):
+    """カテゴリ別ベストパラメータを meta_params.json に書き出す(既存分とマージ)。"""
+    meta_params_name = config["files"].get("meta_params_file", "meta_params.json")
+    root_path = os.path.join(work_dir, meta_params_name)
+    data = {"axes": list(axes), "categories": {}}
+    if os.path.exists(root_path):
+        try:
+            with open(root_path, "r") as f:
+                old = json.load(f)
+            if old.get("axes") == list(axes):
+                data["categories"] = old.get("categories", {})
+            else:
+                print(f"Warning: axes changed ({old.get('axes')} -> {list(axes)}). Existing categories were discarded.")
+        except json.JSONDecodeError:
+            pass
+    data["categories"].update(category_results)
+    data["categories"] = dict(sorted(data["categories"].items()))
+
+    for path in (root_path, os.path.join(study_dir, meta_params_name)):
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
+    print(f"[Done] Wrote per-category best params to {root_path}")
+    return root_path
 
 
 def main():
@@ -186,6 +226,38 @@ def main():
         "--zero",
         help="Run with n_trials = 0 (skip optimization).",
         action="store_true",
+    )
+    parser.add_argument(
+        "--trials",
+        type=int,
+        default=500,
+        help="Number of trials per study (default: 500).",
+    )
+    parser.add_argument(
+        "--cases",
+        type=int,
+        default=50,
+        help="Max cases per study (0 = all available; default: 50).",
+    )
+    parser.add_argument(
+        "--in",
+        dest="in_dir",
+        default=None,
+        metavar="DIR",
+        help="Override testcase input directory (default: config's testcase_input_dir).",
+    )
+    parser.add_argument(
+        "--filter",
+        action="append",
+        default=None,
+        metavar="KEY=V|KEY=LO..HI",
+        help="Filter cases by features (repeatable, both ends inclusive). e.g. --filter N=10..13 --filter W=0",
+    )
+    parser.add_argument(
+        "--by-category",
+        action="store_true",
+        dest="by_category",
+        help="Run one study per category (features.py AXES/BINS) and write meta_params.json.",
     )
     args = parser.parse_args()
 
@@ -227,24 +299,50 @@ def main():
         shutil.copy(sol_file, study_dir)
 
         # Generate params.json by extracting HP_PARAM macros from the copied cpp
-        params_data = _extract_hp_params_from_cpp(cpp_copy)
+        params_data = cpp_params.extract_hp_params(cpp_copy)
         param_json_file = os.path.join(study_dir, param_json_name)
         _write_params_json(params_data, param_json_file)
 
-    input_dir = os.path.join(work_dir, config["paths"]["testcase_input_dir"])
+    if args.in_dir is not None:
+        input_dir = args.in_dir if os.path.isabs(args.in_dir) else os.path.join(work_dir, args.in_dir)
+        input_dir = os.path.normpath(input_dir)
+    else:
+        input_dir = os.path.join(work_dir, config["paths"]["testcase_input_dir"])
     output_dir = study_dir
     sol_file = os.path.join(study_dir, config["files"]["sol_file"])
     vis_file = os.path.join(work_dir, config["files"]["vis_file"])
     score_prefix = config["problem"]["score_prefix"]
     param_json_file = os.path.join(study_dir, config["files"]["optuna_params_file"])
+    direction = config["problem"]["objective"]
 
-    # DBファイルパス（SQLite）
+    # 対象ケースの決定(features によるフィルタ込み)
+    all_case_strs = features_mod.list_case_strs(input_dir)
+    if not all_case_strs:
+        print(f"Error: no testcases found in {input_dir}", file=sys.stderr)
+        sys.exit(1)
+
+    filters = parse_filters(args.filter)
+    features_by_case = {}
+    if filters or args.by_category:
+        features_by_case = features_mod.load_features(input_dir, all_case_strs)
+
+    case_strs = all_case_strs
+    if filters:
+        case_strs = apply_filters(case_strs, features_by_case, filters)
+        print(f"Filter matched {len(case_strs)}/{len(all_case_strs)} cases.")
+        if not case_strs:
+            print("Error: no cases matched the filter.", file=sys.stderr)
+            sys.exit(1)
+
+    def cap_cases(cases):
+        if args.cases > 0:
+            return cases[:args.cases]
+        return cases
+
+    # DBファイルパス(SQLite)
     optuna_db_file = config["files"]["optuna_db_file"]
     db_path = os.path.join(study_dir, optuna_db_file)
     db_url = f"sqlite:///{db_path}?cache=shared&mode=wal"
-
-    # WilcoxonPruner の設定
-    pruner = optuna.pruners.WilcoxonPruner(p_threshold=0.1)
 
     # SQLite ストレージの作成
     storage = RDBStorage(
@@ -257,34 +355,70 @@ def main():
         },
     )
 
-    # Optuna study の作成
-    study = optuna.create_study(
-        study_name=optuna_db_file,
-        storage=storage,
-        load_if_exists=True,
-        direction=config["problem"]["objective"],
-        pruner=pruner,
-    )
+    n_trials = 0 if args.zero else args.trials
 
-    n_trials = 500
-    if args.zero:
-        n_trials = 0
-
-    # 必要なら環境変数名にプレフィックスを付けたい場合はここで設定（例: "HP_")
+    # 必要なら環境変数名にプレフィックスを付けたい場合はここで設定(例: "HP_")
     # 既定はヘッダのデフォルトに合わせて HP_
     env_prefix = os.environ.get("OPTUNA_PARAM_ENV_PREFIX", "HP_")
 
-    # 並列度は環境変数 OPTUNA_N_JOBS で上書き可能（デフォルト: -1 = 最大）
+    # 並列度は環境変数 OPTUNA_N_JOBS で上書き可能(デフォルト: -1 = 最大)
     n_jobs_env = os.environ.get("OPTUNA_N_JOBS")
     try:
         n_jobs = int(n_jobs_env) if n_jobs_env is not None else -1
     except Exception:
         n_jobs = -1
 
-    study.optimize(
-        lambda trial: objective(trial, input_dir, output_dir, sol_file, vis_file, score_prefix, param_json_file, env_prefix=env_prefix),
-        n_trials=n_trials,
-        n_jobs=n_jobs,
+    def make_objective(target_cases):
+        return lambda trial: objective(
+            trial, target_cases, input_dir, output_dir, sol_file, vis_file,
+            score_prefix, param_json_file, env_prefix=env_prefix,
+        )
+
+    if args.by_category:
+        # カテゴリごとに study を作り、ベストパラメータを meta_params.json へ集約する
+        binner = features_mod.build_binner(features_by_case)
+        if binner is None:
+            print("Error: --by-category には features.py の AXES 設定が必要です。", file=sys.stderr)
+            sys.exit(1)
+        groups, unmatched = meta_report.group_by_category(case_strs, features_by_case, binner)
+        if not groups:
+            print("Error: no cases were assigned to any category.", file=sys.stderr)
+            sys.exit(1)
+        if unmatched:
+            print(f"Note: {len(unmatched)} cases are uncategorized and will be skipped.")
+
+        category_results = {}
+        for cat, cases in groups.items():
+            cat_key = meta_report.category_key(cat)
+            target_cases = cap_cases(cases)
+            print()
+            print(f"=== Category {cat_key} ({len(target_cases)} cases, {n_trials} trials) ===")
+            study = optimize_study(
+                storage, cat_key, direction, make_objective(target_cases), n_trials, n_jobs,
+            )
+            try:
+                best_params = study.best_params
+                best_score = study.best_value
+            except ValueError:
+                print(f"Skipped {cat_key}: no completed trials.")
+                continue
+            print(f"Best for {cat_key}: {best_params} (score={best_score:.2f})")
+            category_results[cat_key] = {
+                "params": best_params,
+                "best_score": best_score,
+                "n_cases": len(target_cases),
+                "n_trials": len(study.trials),
+            }
+
+        if category_results:
+            write_meta_params(config, work_dir, study_dir, binner.axes, category_results)
+        return
+
+    # 単一 study(従来動作)
+    target_cases = cap_cases(case_strs)
+    print(f"Optimizing on {len(target_cases)} cases, {n_trials} trials.")
+    study = optimize_study(
+        storage, optuna_db_file, direction, make_objective(target_cases), n_trials, n_jobs,
     )
 
     # 最終ベストパラメータで study_dir の JSON の "value" を更新し、ルートの params.json にも反映

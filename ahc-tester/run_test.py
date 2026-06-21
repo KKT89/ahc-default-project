@@ -2,6 +2,10 @@ import argparse
 import build
 from build import RELEASE_FLAGS
 import config_util
+import features as features_mod
+import meta_report
+import report
+import re
 import shutil
 import subprocess
 import time
@@ -73,6 +77,7 @@ def run_test_case(
     tester_file,
     score_prefix,
     interactive,
+    env=None,
 ):
     cmd_cpp = [tester_file, solution_file] if interactive else [solution_file]
     start_time = time.perf_counter()
@@ -87,6 +92,7 @@ def run_test_case(
                 stderr=ferr,
                 text=True,
                 check=True,
+                env=env,
             )
         elapsed_time_ms = (time.perf_counter() - start_time) * 1000.0
         status = "AC"
@@ -162,8 +168,260 @@ def run_test_case(
     }
 
 
+def print_category_breakdown(input_dir, selected_case_strs, result_by_case, fail_score, ref_map, objective):
+    """features.py の軸設定に基づき、カテゴリ別の vsBest 集計表を表示する。"""
+    if not features_mod.AXES:
+        return
+    try:
+        feats = features_mod.load_features(input_dir, selected_case_strs)
+        binner = features_mod.build_binner(feats)
+    except Exception as exc:
+        print(f"Category breakdown skipped: {exc}")
+        return
+    if binner is None:
+        return
+    groups, unmatched = meta_report.group_by_category(selected_case_strs, feats, binner)
+    if not groups:
+        return
+
+    def eff_of(case_str):
+        return effective_score_from_result(
+            result_by_case.get(case_str, {"status": "WA", "score": None}),
+            fail_score,
+        )
+
+    def cell(cat, cases):
+        return meta_report.vs_ref_cell(cases, eff_of, ref_map, objective)
+
+    print()
+    print(f"Category Breakdown vs best(ref)  [axes: {', '.join(binner.axes)}]")
+    for line in meta_report.render_matrix(binner, groups, cell):
+        print("  " + line)
+    if unmatched:
+        print(f"  (uncategorized: {len(unmatched)} cases)")
+
+
+def resolve_input_dir(args, config, work_dir):
+    if args.in_dir is None:
+        return os.path.join(work_dir, config["paths"]["testcase_input_dir"])
+    in_dir_arg = args.in_dir.strip()
+    input_dir = in_dir_arg if os.path.isabs(in_dir_arg) else os.path.join(work_dir, in_dir_arg)
+    input_dir = os.path.normpath(input_dir)
+    print(f"Input dir override: {os.path.relpath(input_dir, work_dir)}")
+    if not os.path.isdir(input_dir):
+        raise FileNotFoundError(f"Input directory not found: {input_dir}")
+    return input_dir
+
+
+def select_case_ids(args, config, input_dir):
+    available_cases = sorted(
+        int(os.path.splitext(fname)[0])
+        for fname in os.listdir(input_dir)
+        if fname.endswith(".txt") and os.path.splitext(fname)[0].isdigit()
+    )
+    if args.range is not None:
+        l_seed, r_seed = args.range
+        return [c for c in available_cases if l_seed <= c < r_seed]
+    config_case_count = config["problem"]["pretest_count"]
+    requested_count = args.cases if args.cases is not None else config_case_count
+    return available_cases[:min(requested_count, len(available_cases))]
+
+
+def save_run_results(config, work_dir, label, cpp_rel, input_dir, extra_flags, results_map, variant=None):
+    """ラン結果を results/ に保存する(report.py で閲覧・比較できる)。"""
+    results_dir = os.path.join(work_dir, config["paths"].get("results_dir", "results"))
+    os.makedirs(results_dir, exist_ok=True)
+    timestamp = time.strftime("%Y%m%d_%H%M%S")
+    payload = {
+        "label": label,
+        "cpp_file": cpp_rel,
+        "timestamp": timestamp,
+        "input_dir": os.path.relpath(input_dir, work_dir),
+        "objective": config["problem"]["objective"],
+        "extra_flags": list(extra_flags),
+        "variant": variant,
+        "results": results_map,
+    }
+    path = os.path.join(results_dir, f"{timestamp}_{label}.json")
+    suffix = 2
+    while os.path.exists(path):
+        path = os.path.join(results_dir, f"{timestamp}_{label}_{suffix}.json")
+        suffix += 1
+    with open(path, "w") as f:
+        json.dump(payload, f, indent=2)
+    print(f"Saved run results -> {os.path.relpath(path, work_dir)}")
+    return path
+
+
+def results_map_from_list(results):
+    return {
+        r["case"]: {"score": r["score"], "time_ms": r["elapsed_time"], "status": r["status"]}
+        for r in results
+    }
+
+
+def parse_variant_spec(spec, env_prefix="HP_"):
+    """--variant の "STRATEGY=1,T0=1.5" 形式を環境変数の上書き dict にする。"""
+    overlay = {}
+    for part in spec.split(","):
+        key, sep, val = part.partition("=")
+        key, val = key.strip(), val.strip()
+        if not sep or not key or not val:
+            raise ValueError(f"Invalid --variant: {spec} (expected KEY=VALUE[,KEY=VALUE...])")
+        env_key = key if key.startswith(env_prefix) else env_prefix + key
+        overlay[env_key] = val
+    return overlay
+
+
+def _dedup_label(base, used):
+    label, suffix = base, 2
+    while label in used:
+        label = f"{base}_{suffix}"
+        suffix += 1
+    return label
+
+
+def run_comparison(args, config, extra_flags):
+    """複数 cpp(または --variant の env セット)をビルド・実行して比較する。
+
+    best/prev のスコアトラッキングは行わない。
+    """
+    work_dir = config_util.work_dir()
+    input_dir = resolve_input_dir(args, config, work_dir)
+    selected_cases = select_case_ids(args, config, input_dir)
+    if not selected_cases:
+        print("No cases to run.")
+        return
+
+    cpp_list = args.cpps or [config["files"]["cpp_file"]]
+    variants = args.variant or []
+    if variants and len(cpp_list) > 1:
+        raise ValueError("--variant は単一の CPP ファイルとのみ併用できます。")
+
+    # 比較対象 jobs = (cpp, label, env 上書き, variant 文字列) のリスト
+    if variants:
+        if args.tag and len(args.tag) != len(variants):
+            raise ValueError("--tag の個数は --variant の個数と一致させてください。")
+        labels = []
+        for i, spec in enumerate(variants):
+            base = args.tag[i] if args.tag else re.sub(r"[^A-Za-z0-9_.-]+", "-", spec).strip("-")
+            labels.append(_dedup_label(base, labels))
+        jobs = [
+            (cpp_list[0], label, parse_variant_spec(spec), spec)
+            for label, spec in zip(labels, variants)
+        ]
+    else:
+        if args.tag and len(args.tag) != len(cpp_list):
+            raise ValueError("--tag の個数は CPP ファイル数と一致させてください。")
+        labels = []
+        for i, cpp in enumerate(cpp_list):
+            base = args.tag[i] if args.tag else os.path.splitext(os.path.basename(cpp))[0]
+            labels.append(_dedup_label(base, labels))
+        jobs = [(cpp, label, None, None) for cpp, label in zip(cpp_list, labels)]
+
+    output_root = os.path.join(work_dir, config["paths"]["testcase_output_dir"])
+    vis_file = os.path.join(work_dir, config["files"]["vis_file"])
+    tester_file = os.path.join(work_dir, config["files"]["tester_file"])
+    score_prefix = config["problem"]["score_prefix"]
+    objective = config["problem"]["objective"]
+    interactive = config["problem"]["interactive"]
+
+    cases_to_run = [
+        (f"{c:03d}", os.path.join(input_dir, f"{c:03d}.txt"))
+        for c in selected_cases
+    ]
+    selected_case_strs = [case_str for case_str, _ in cases_to_run]
+
+    built = {}  # cpp の絶対パス -> ビルド済みバイナリ(variant モードでは1回だけビルド)
+    runs = []
+    for cpp, label, overlay, variant in jobs:
+        cpp_path = cpp if os.path.isabs(cpp) else os.path.join(work_dir, cpp)
+        if not os.path.exists(cpp_path):
+            raise FileNotFoundError(f"CPP file not found: {cpp_path}")
+        sol_file = built.get(cpp_path)
+        if sol_file is None:
+            bin_name = os.path.splitext(os.path.basename(cpp_path))[0] if variants else label
+            sol_file = os.path.join(work_dir, "bin", bin_name)
+            build.compile_program(config, extra_flags=extra_flags, cpp_file=cpp_path, sol_file=sol_file)
+            built[cpp_path] = sol_file
+        out_dir = os.path.join(output_root, label)
+        os.makedirs(out_dir, exist_ok=True)
+        env = None if overlay is None else {**os.environ, **overlay}
+        if variant is not None:
+            print(f"Variant {label}: {variant}")
+
+        results_map = {}
+        with ThreadPoolExecutor(max_workers=max(args.jobs, 1)) as executor:
+            futures = [
+                (
+                    executor.submit(
+                        run_test_case,
+                        case_str,
+                        input_file,
+                        os.path.join(out_dir, case_str + ".txt"),
+                        sol_file,
+                        vis_file,
+                        tester_file,
+                        score_prefix,
+                        interactive,
+                        env,
+                    ),
+                    case_str,
+                )
+                for case_str, input_file in cases_to_run
+            ]
+            for fut, case_str in futures:
+                try:
+                    result = fut.result()
+                except Exception as exc:
+                    print(f"Error: case {case_str} ({label}) exception: {exc}")
+                    results_map[case_str] = {"score": None, "time_ms": 0.0, "status": "ERR"}
+                    continue
+                results_map[result["case"]] = {
+                    "score": result["score"],
+                    "time_ms": result["elapsed_time"],
+                    "status": result["status"],
+                }
+
+        ac_entries = [
+            e for e in results_map.values()
+            if str(e["status"]).startswith("AC") and e["score"] is not None
+        ]
+        total = sum(e["score"] for e in ac_entries)
+        max_time = max((e["time_ms"] for e in results_map.values()), default=0.0)
+        print(f"  {label}: AC {len(ac_entries)}/{len(selected_case_strs)}, total={total:,d}, max_time={max_time:.0f} ms")
+
+        run = {"label": label, "cpp_file": os.path.relpath(cpp_path, work_dir), "results": results_map}
+        runs.append(run)
+        save_run_results(
+            config, work_dir, label, run["cpp_file"], input_dir, extra_flags, results_map, variant=variant,
+        )
+
+    print()
+    report.render_comparison(runs, selected_case_strs, objective, input_dir, show_cases=len(runs) >= 2)
+
+
 def parse_args():
     parser = argparse.ArgumentParser(description="Run local tests for AHC submissions.")
+    parser.add_argument(
+        "cpps",
+        nargs="*",
+        metavar="CPP",
+        help="Compare mode: build and evaluate these .cpp files (score tracking disabled).",
+    )
+    parser.add_argument(
+        "--tag",
+        action="append",
+        default=None,
+        help="Label for saved results. Repeatable in compare mode (must match the number of CPP files).",
+    )
+    parser.add_argument(
+        "--variant",
+        action="append",
+        default=None,
+        metavar="KEY=V[,KEY=V...]",
+        help="Compare mode: run the same binary with HP_ env overrides (repeatable). e.g. --variant STRATEGY=0 --variant STRATEGY=1",
+    )
     parser.add_argument("--cases", type=int, default=None, help="Number of test cases to run.")
     parser.add_argument("--range", nargs=2, metavar=("L", "R"), type=int, default=None, help="Run cases with seed IDs in [L, R).")
     parser.add_argument(
@@ -210,6 +468,15 @@ def main():
     if args.release:
         extra_flags += RELEASE_FLAGS
         print(f"Release build enabled: {' '.join(RELEASE_FLAGS)}")
+
+    if args.cpps or args.variant:
+        # 複数解法(または同一バイナリの variant)の比較モード
+        run_comparison(args, config, extra_flags)
+        return
+
+    if args.tag is not None and len(args.tag) > 1:
+        raise ValueError("--tag を複数指定できるのは比較モード(CPP ファイル指定時)のみです。")
+
     build.compile_program(config, extra_flags=extra_flags)
 
     work_dir = config_util.work_dir()
@@ -219,15 +486,7 @@ def main():
     else:
         print("Score tracking disabled (--in was specified).")
 
-    if args.in_dir is None:
-        input_dir = os.path.join(work_dir, config["paths"]["testcase_input_dir"])
-    else:
-        in_dir_arg = args.in_dir.strip()
-        input_dir = in_dir_arg if os.path.isabs(in_dir_arg) else os.path.join(work_dir, in_dir_arg)
-        input_dir = os.path.normpath(input_dir)
-        print(f"Input dir override: {os.path.relpath(input_dir, work_dir)}")
-        if not os.path.isdir(input_dir):
-            raise FileNotFoundError(f"Input directory not found: {input_dir}")
+    input_dir = resolve_input_dir(args, config, work_dir)
 
     output_dir = os.path.join(work_dir, config["paths"]["testcase_output_dir"])
     solution_file = os.path.join(work_dir, config["files"]["sol_file"])
@@ -242,19 +501,7 @@ def main():
     prev_scores_file = score_file_path(PREV_SCORES_FILENAME, work_dir)
     prev_scores_label = os.path.relpath(prev_scores_file, work_dir)
 
-    available_cases = sorted(
-        int(os.path.splitext(fname)[0])
-        for fname in os.listdir(input_dir)
-        if fname.endswith(".txt") and os.path.splitext(fname)[0].isdigit()
-    )
-
-    if args.range is not None:
-        l_seed, r_seed = args.range
-        selected_cases = [c for c in available_cases if l_seed <= c < r_seed]
-    else:
-        config_case_count = config["problem"]["pretest_count"]
-        requested_count = args.cases if args.cases is not None else config_case_count
-        selected_cases = available_cases[:min(requested_count, len(available_cases))]
+    selected_cases = select_case_ids(args, config, input_dir)
 
     if score_tracking_enabled:
         best_scores_map = load_scores(best_scores_file)
@@ -521,6 +768,26 @@ def main():
 
     print_relative_vs(prev_scores_map, "prev")
     print_relative_vs(best_scores_ref_map, "best(ref)")
+
+    print_category_breakdown(
+        input_dir=input_dir,
+        selected_case_strs=selected_case_strs,
+        result_by_case=result_by_case,
+        fail_score=fail_score,
+        ref_map=best_scores_ref_map,
+        objective=objective,
+    )
+
+    single_label = args.tag[0] if args.tag else os.path.splitext(os.path.basename(config["files"]["cpp_file"]))[0]
+    save_run_results(
+        config,
+        work_dir,
+        single_label,
+        config["files"]["cpp_file"],
+        input_dir,
+        extra_flags,
+        results_map_from_list(results),
+    )
 
     if not score_tracking_enabled:
         return

@@ -12,6 +12,7 @@ DEFAULT_CONFIG = {
         "testcase_input_dir": "in",                         # テストケースの入力ファイルがあるディレクトリ
         "testcase_output_dir": "out",                       # テストケースの出力ファイルを保存するディレクトリ
         "optuna_work_dir": "optuna_work",                   # Optuna 用の作業ディレクトリ
+        "results_dir": "results",                           # ラン結果(JSON)を保存するディレクトリ
     },
     "files": {
         "cpp_file": "main.cpp",                             # メインのソースファイル
@@ -22,6 +23,7 @@ DEFAULT_CONFIG = {
         "tester_file": "tools/tester",                      # テスタープログラムの名前
         "optuna_db_file": "optuna_study.db",                # Optuna 用のデータベースファイル
         "optuna_params_file": "params.json",                # Optuna 用パラメータ定義ファイル
+        "meta_params_file": "meta_params.json",             # カテゴリ別ベストパラメータの集約ファイル
     },
     "problem": {
         "pretest_count": 150,                               # プレテストの数
